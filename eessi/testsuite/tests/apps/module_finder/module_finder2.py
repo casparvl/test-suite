@@ -12,6 +12,7 @@ Tested matrix operations with NumPy:
 import reframe as rfm
 import reframe.utility.sanity as sn
 from reframe.core.builtins import parameter, run_after, run_before, sanity_function, variable
+from reframe.core.runtime import valid_sysenv_comb
 
 from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES, SCALES
 from eessi.testsuite.eessi_mixin import EESSI_Mixin
@@ -47,7 +48,12 @@ class EESSI_ModuleFinder2(rfm.RunOnlyRegressionTest):
     def apply_module_info(self):
         s, e, m = self.module_info
         print(f"SYSTEM {s}")
-        # self.valid_systems = [s]
+        valid_partitions = [part.fullname for part in valid_sysenv_comb(['+gpu'], e)]
+        print(f"valid_partitions: {valid_partitions}")
+        if s in valid_partitions:
+            self.valid_systems = [s]
+        else:
+            self.valid_systems = []
         # self.valid_systems = [s + ' +gpu']
         # self.valid_systems = [s + ' +cpu']
         # self.valid_systems = ['+cpu']
@@ -58,7 +64,7 @@ class EESSI_ModuleFinder2(rfm.RunOnlyRegressionTest):
         # self.valid_systems = ['snellius:* +bar +foo']
         # self.valid_systems = ['snellius:* +bar']
         # self.valid_systems = ['snellius:* +foo']
-        self.valid_systems = [f"+{s.replace(':','')} +gpu"]
+        # self.valid_systems = [f"+{s.replace(':','')} +gpu"]
         self.valid_prog_environs = [e]
         self.modules = [m]
         self.tags = {self.scale}
