@@ -48,13 +48,13 @@ class EESSI_ModuleFinder2(rfm.RunOnlyRegressionTest):
     def apply_module_info(self):
         s, e, m = self.module_info
         print(f"SYSTEM {s}")
-        valid_partitions = [part.fullname for part in valid_sysenv_comb(['+gpu'], e)]
-        print(f"valid_partitions: {valid_partitions}")
-        if s in valid_partitions:
-            self.valid_systems = [s]
-        else:
-            self.valid_systems = []
-        # self.valid_systems = [s + ' +gpu']
+        # valid_partitions = [part.fullname for part in valid_sysenv_comb(['+gpu'], e)]
+        # print(f"valid_partitions: {valid_partitions}")
+        # if s in valid_partitions:
+        #     self.valid_systems = [s]
+        # else:
+        #     self.valid_systems = []
+        self.valid_systems = [s + ' +gpu']
         # self.valid_systems = [s + ' +cpu']
         # self.valid_systems = ['+cpu']
         # self.valid_systems = ['foo:bar']
