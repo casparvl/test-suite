@@ -13,17 +13,17 @@ from reframe.core.exceptions import ReframeFatalError
 from reframe.core.logging import getlogger
 import reframe.core.runtime as rt
 from reframe.frontend.printer import PrettyPrinter
-from reframe.utility import find_modules as rf_find_modules
+from reframe.utility import typecheck as typ
 
 from eessi.testsuite.constants import DEVICE_TYPES
 
 printer = PrettyPrinter()
 
 # global variables
-_available_modules = []
 _eb_is_available = False
 _eb_avail_warning_is_printed = False
 _unique_msg_ids = []
+_modules_cache = {}
 
 try:
     from easybuild.framework.easyconfig.easyconfig import get_toolchain_hierarchy
@@ -129,30 +129,76 @@ def split_module(module: str) -> tuple:
     return name, version, tcname, tcversion, versionsuffix
 
 
-def get_avail_modules() -> List[str]:
-    "get all available modules in the system"
-    # use global to avoid recalculating the list of available modules multiple times
-    global _available_modules
-    if not _available_modules:
-        ms = rt.runtime().modules_system
-        # Returns e.g. ['Bison/', 'Bison/3.7.6-GCCcore-10.3.0', 'BLIS/', 'BLIS/0.8.1-GCC-10.3.0']
-        _available_modules = ms.available_modules('')
-        # Exclude anything without version, i.e. ending with / (e.g. Bison/)
-        _available_modules = [mod for mod in _available_modules if not mod.endswith('/')]
-        log(f"Total number of available modules: {len(_available_modules)}")
-    if not _available_modules:
-        msg = 'No available modules found on the system.'
-        raise EESSIError(msg)
-    return _available_modules
-
-
-def find_modules(substr, environ_mapping=None) -> Iterator[Tuple[str, str, str]]:
+def find_modules(regex: str, environ_mapping=None, name_only=True) -> Iterator[Tuple[str, str, str]]:
     """
-    Wraps reframe.utility.find_modules in order to provide caching, so that we don't have to do repeated
-    module avail calls.
+    Similar to reframe.utility.find_modules:
+    - adds caching, so that we don't have to do repeated module avail calls
+    - adds the name_only argument
+
+    Arguments:
+    - regex: regular expression used to find matching modules
+    - environ_mapping: environment mapping
+    - name_only: whether to match only the name of the module, not the version
     """
-    # TODO: implement caching to make this function more efficient
-    return rf_find_modules(substr, environ_mapping)
+
+    if not isinstance(regex, str):
+        raise TypeError("'regex' argument must be a string")
+
+    if (environ_mapping is not None and not isinstance(environ_mapping, typ.Dict[str, str])):
+        raise TypeError("'environ_mapping' argument must be of type Dict[str,str]")
+
+    if name_only:
+        # Remove trailing slashes from the regex (in case the callee forgot)
+        regex = regex.rstrip('/')
+
+    regex_re = re.compile(regex)
+    name_only_re = re.compile(r'/[^/]*$')
+
+    def _is_valid_for_env(mod, env):
+        if environ_mapping is None:
+            return True
+
+        for patt, env in environ_mapping.items():
+            if re.match(patt, mod) and env == env:
+                return True
+
+        return False
+
+    ms = rt.runtime().modules_system
+    current_system = rt.runtime().system
+    snap0 = rt.snapshot()
+
+    for part in current_system.partitions:
+        if part.name not in _modules_cache:
+            _modules_cache[part.name] = {}
+        for env in part.environs:
+            rt.loadenv(part.local_env, env)
+            if env.name not in _modules_cache[part.name]:
+                available_modules = ms.available_modules()
+                _modules_cache[part.name][env.name] = [mod for mod in available_modules if not mod.endswith('/')]
+            snap0.restore()
+            seen = set()
+            dupes = []
+            for mod in _modules_cache[part.name][env.name]:
+                modmod = mod
+                if name_only:
+                    modmod = name_only_re.sub('', mod)
+                if regex_re.search(modmod):
+                    log(f"Matched module {modmod} with regex {regex}")
+                    if mod in seen:
+                        dupes.append(mod)
+                    else:
+                        seen.add(mod)
+                    if _is_valid_for_env(mod, env.name):
+                        yield (part.fullname, env.name, mod)
+
+            if dupes:
+                err_msg = (
+                    "EESSI test-suite cannot handle duplicate modules. "
+                    "Please make sure that only one is available on your system. "
+                    f"The following modules have a duplicate on your system: {sorted(dupes)}"
+                )
+                raise ValueError(err_msg)
 
 
 def get_tc_hierarchy(tcdict):
