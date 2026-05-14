@@ -174,6 +174,7 @@ def find_modules(regex: str, environ_mapping=None, name_only=True) -> Iterator[T
         for env in part.environs:
             rt.loadenv(part.local_env, env)
             if env.name not in _modules_cache[part.name]:
+                log(f'Getting available modules for {env.name}')
                 available_modules = ms.available_modules()
                 _modules_cache[part.name][env.name] = [mod for mod in available_modules if not mod.endswith('/')]
             snap0.restore()
