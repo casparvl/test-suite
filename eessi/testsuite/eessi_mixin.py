@@ -176,7 +176,7 @@ class EESSI_Mixin(RegressionTestPlugin):
         # Unpack module_info
         sys, env, mod = self.module_info
         self.valid_prog_environs = [env]
-        self.module_name = [mod]
+        self.module_name = mod
 
         # Set modules
         hooks.set_modules(self)
