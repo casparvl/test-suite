@@ -143,7 +143,7 @@ class EESSI_ESPRESSO_LB(EESSI_ESPRESSO_base, EESSI_Mixin):
             1. Versions with commit hashes have walberla in them. If not then they will not be filtered here and will
             run.
         """
-        module_version = split_module(self.module_name)[1]
+        module_version = split_module(self.module_info[2])[1]
         if re.match(r"\d+\.\d+\.\d+", module_version):
             major_version = re.search(r"\d+", module_version)
             major_version = int(major_version.group()) if major_version is not None else -1
