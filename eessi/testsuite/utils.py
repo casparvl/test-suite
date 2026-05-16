@@ -224,7 +224,7 @@ def get_tc_hierarchy(tcdict):
             _eb_avail_warning_is_printed = True
 
 
-def select_matching_modules(module_infos: List[tuple], ref_module_info: tuple) ->List[tuple]:
+def select_matching_modules(module_infos: List[tuple], ref_module_info: tuple) -> List[tuple]:
     """
     Return, from a list of module_info tuples, all module_info tuples with modules that match the
     toolchain of a reference module.
