@@ -24,7 +24,7 @@ Supported tags in this ReFrame test (in addition to the common tags):
 
 import reframe as rfm
 from reframe.core.builtins import parameter, run_after, run_before, sanity_function
-import reframe.core.logging as rflog
+from reframe.core.logging import getlogger
 import reframe.utility.sanity as sn
 
 from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES, SCALES
@@ -42,27 +42,31 @@ def multi_thread_scales():
 
 def get_blas_modules(blas_name):
     """
-    Find available blas_name modules and (latest) matching BLIS module
+    Find available blas_name module_infos with (most recent) matching BLIS module
 
-    Returns: a list of lists: each inner list has the blas_name module as first item,
-             and the matching BLIS module as second item.  The BLIS module must
-             be second to avoid segmentation fault for AOCL-BLAS
+    Returns: If blas_name is 'BLIS', returns the BLIS module_infos.
+             Otherwise, returns a list of tuples (syspart, env, [mod, blis]):
+             each inner list has the blas_name module as first item, and the
+             matching BLIS module as second item.  The BLIS module must be
+             second to avoid segmentation fault for AOCL-BLAS
     """
-    blas_modules = list(find_modules(rf'{blas_name}$'))
+    blas_module_infos = list(find_modules(rf'{blas_name}$'))
     if blas_name == 'BLIS':
-        return [[x] for x in blas_modules]
+        return [(x, y, [z]) for x, y, z in blas_module_infos]
 
     ml_lists = []
-    blis_modules = list(find_modules('BLIS$'))
+    blis_module_infos = list(find_modules('BLIS$'))
 
-    for mod in blas_modules:
-        matching_blises = sorted(select_matching_modules(blis_modules, mod))
-        if not matching_blises:
-            msg = f'Skipping BLAS module {mod}: no matching BLIS module found.'
-            rflog.getlogger().warning(msg)
+    for mod_info in blas_module_infos:
+        matching_blis_infos = select_matching_modules(blis_module_infos, mod_info)
+        if not matching_blis_infos:
+            msg = f'Skipping BLAS module info {mod_info}: no matching BLIS module found.'
+            getlogger().warning(msg)
             continue
-        blis = matching_blises[-1]
-        ml_lists.append([mod, blis])
+        # assume the last BLIS module is the most recent one (find_modules sorts them)
+        blis = matching_blis_infos[-1][-1]
+        syspart, env, mod = mod_info
+        ml_lists.append((syspart, env, [mod, blis]))
 
     return ml_lists
 
@@ -169,7 +173,7 @@ class EESSI_BLAS_OpenBLAS_mt(EESSI_BLAS_base, EESSI_Mixin):
     "multi-threaded OpenBLAS test"
 
     scale = multi_thread_scales()
-    module_name = parameter(get_blas_modules('OpenBLAS'))
+    module_info = parameter(get_blas_modules('OpenBLAS'))
     flexiblas_blas_lib = 'openblas'
     tags = {'openblas'}
     is_ci_test = True
@@ -181,7 +185,7 @@ class EESSI_BLAS_AOCLBLAS_mt(EESSI_BLAS_base, EESSI_Mixin):
     "multi-threaded AOCL-BLAS test"
 
     scale = multi_thread_scales()
-    module_name = parameter(get_blas_modules('AOCL-BLAS'))
+    module_info = parameter(get_blas_modules('AOCL-BLAS'))
     flexiblas_blas_lib = 'aocl_mt'
     tags = {'aocl-blas'}
     thread_binding = 'compact'
@@ -192,17 +196,18 @@ class EESSI_BLAS_imkl_mt(EESSI_BLAS_base, EESSI_Mixin):
     "multi-threaded imkl test"
 
     scale = multi_thread_scales()
-    module_name = parameter(get_imkl_modules())
+    module_info = parameter(get_imkl_modules())
     flexiblas_blas_lib = 'imkl'
     tags = {'imkl'}
     thread_binding = 'compact'
 
 
+@rfm.simple_test
 class EESSI_BLAS_BLIS_mt(EESSI_BLAS_base, EESSI_Mixin):
     "multi-threaded BLIS test"
 
     scale = multi_thread_scales()
-    module_name = parameter(get_blas_modules('BLIS'))
+    module_info = parameter(get_blas_modules('BLIS'))
     flexiblas_blas_lib = 'blis'
     tags = {'blis'}
     thread_binding = 'compact'

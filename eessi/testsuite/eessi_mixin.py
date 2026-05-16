@@ -13,7 +13,7 @@ from reframe.core.runtime import valid_sysenv_comb
 from reframe import VERSION as reframe_version
 
 from eessi.testsuite import check_process_binding, hooks
-from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES, SCALES, TAGS
+from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES, INVALID_SYSTEM, SCALES, TAGS
 from eessi.testsuite.utils import EESSIError, log, log_once
 from eessi.testsuite import __version__ as testsuite_version
 
@@ -163,9 +163,6 @@ class EESSI_Mixin(RegressionTestPlugin):
         # Filter on which scales are supported by the partitions defined in the ReFrame configuration
         hooks.filter_supported_scales(self)
 
-        if self.require_buildenv_module:
-            hooks.add_buildenv_module(self)
-
         thread_binding = self.thread_binding.lower()
         if thread_binding in ('true', 'compact'):
             hooks.set_compact_thread_binding(self)
@@ -174,9 +171,16 @@ class EESSI_Mixin(RegressionTestPlugin):
             raise EESSIError(err_msg)
 
         # Unpack module_info
-        sys, env, mod = self.module_info
+        syspart, env, mod = self.module_info
         self.valid_prog_environs = [env]
         self.module_name = mod
+
+        # Set module_names
+        hooks.set_module_names(self)
+
+        # Add buildenv module if requested
+        if self.require_buildenv_module:
+            hooks.add_buildenv_module(self)
 
         # Set modules
         hooks.set_modules(self)
@@ -196,7 +200,7 @@ class EESSI_Mixin(RegressionTestPlugin):
         # (by calling the hook), then check if the sys:part combination from the find_modules triplet
         # is in the list of valid combinations for the given features
         if syspart_feat_supported:
-            self.valid_systems = [sys]
+            self.valid_systems = [syspart]
             hooks.filter_valid_systems_by_device_type(self, required_device_type=self.device_type)
         else:
             # Filter by defice type. E.g. add features based on whether CUDA appears in the module name
@@ -204,10 +208,10 @@ class EESSI_Mixin(RegressionTestPlugin):
 
             # Check if partitions returned by find_modules satisfy the current features/extras in valid_systems
             valid_partitions = [part.fullname for part in valid_sysenv_comb(self.valid_systems, env)]
-            if sys in valid_partitions:
-                self.valid_systems = [sys]
+            if syspart in valid_partitions:
+                self.valid_systems = [syspart]
             else:
-                self.valid_systems = []
+                self.valid_systems = [INVALID_SYSTEM]
 
         # Set scales as tags
         hooks.set_tag_scale(self)

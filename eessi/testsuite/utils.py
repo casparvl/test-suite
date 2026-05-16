@@ -24,6 +24,7 @@ _eb_is_available = False
 _eb_avail_warning_is_printed = False
 _unique_msg_ids = []
 _modules_cache = {}
+_mod_hierarchies = {}
 
 try:
     from easybuild.framework.easyconfig.easyconfig import get_toolchain_hierarchy
@@ -104,6 +105,7 @@ def split_module(module: str) -> tuple:
     2) there are no hyphens in the version, toolchain_name, or toolchain_version unless exceptions are added
     Exceptions:
     - toolchain_name 'intel-compilers'
+    - toolchain_name 'llvm-compilers'
 
     Arguments:
     - module: the full module name
@@ -116,8 +118,8 @@ def split_module(module: str) -> tuple:
     if len(parts) == 1:  # system toolchain, no versionsuffix
         parts.extend(['system', 'system'])
 
-    # special casing intel-compilers:
-    if parts[1] == 'intel' and parts[2] == 'compilers':
+    # special casing intel-compilers and llvm-compilers:
+    if parts[1] in ['intel', 'llvm'] and parts[2] == 'compilers':
         parts = [parts[0], '-'.join(parts[1:3])] + parts[3:]
 
     tcname = parts[1]
@@ -169,23 +171,23 @@ def find_modules(regex: str, environ_mapping=None, name_only=True) -> Iterator[T
     snap0 = rt.snapshot()
 
     for part in current_system.partitions:
-        if part.name not in _modules_cache:
-            _modules_cache[part.name] = {}
+        if part.fullname not in _modules_cache:
+            _modules_cache[part.fullname] = {}
         for env in part.environs:
             rt.loadenv(part.local_env, env)
-            if env.name not in _modules_cache[part.name]:
-                log(f'Getting available modules for {env.name}')
-                available_modules = ms.available_modules()
-                _modules_cache[part.name][env.name] = [mod for mod in available_modules if not mod.endswith('/')]
+            if env.name not in _modules_cache[part.fullname]:
+                log(f'Getting available modules for ({part.fullname}, {env.name})')
+                available_modules = sorted(ms.available_modules())
+                _modules_cache[part.fullname][env.name] = [mod for mod in available_modules if not mod.endswith('/')]
             snap0.restore()
             seen = set()
             dupes = []
-            for mod in _modules_cache[part.name][env.name]:
+            for mod in _modules_cache[part.fullname][env.name]:
                 modmod = mod
                 if name_only:
                     modmod = name_only_re.sub('', mod)
                 if regex_re.search(modmod):
-                    log(f"Matched module {modmod} with regex {regex}")
+                    log(f"Matched module {mod} with regex {regex}")
                     if mod in seen:
                         dupes.append(mod)
                     else:
@@ -222,40 +224,50 @@ def get_tc_hierarchy(tcdict):
             _eb_avail_warning_is_printed = True
 
 
-def select_matching_modules(modules: List[str], ref_module: str) -> List[str]:
+def select_matching_modules(module_infos: List[tuple], ref_module_info: tuple) ->List[tuple]:
     """
-    Return from a list of modules all modules that match the
+    Return, from a list of module_info tuples, all module_info tuples with modules that match the
     toolchain of a reference module.
 
     Arguments:
-    - modules: list of modules from which a selection is made
-    - ref_module: the reference module
+    - module_infos: list of module info tuples from which a selection is made
+    - ref_module_info: the reference module info
 
     Requirements:
     - recent enough easybuild Python package
     """
 
-    selected_mods = []
+    selected_mod_infos = []
 
-    ref_tcname, ref_tcversion = split_module(ref_module)[2:4]
+    ref_syspart, ref_env, ref_mod = ref_module_info
+
+    ref_tcname, ref_tcversion = split_module(ref_mod)[2:4]
     ref_tcdict = {'name': ref_tcname, 'version': ref_tcversion}
     ref_hierarchy = get_tc_hierarchy(ref_tcdict)
     if not ref_hierarchy:
         return []
 
-    for mod in modules:
+    for mod_info in module_infos:
+        syspart, env, mod = mod_info
+        # only select the ones that have the same system:partition and environment as the reference
+        if syspart != ref_syspart or env != ref_env:
+            continue
+
         mod_tcname, mod_tcversion = split_module(mod)[2:4]
         mod_tcdict = {'name': mod_tcname, 'version': mod_tcversion}
 
-        mod_hierarchy = get_tc_hierarchy(mod_tcdict)
+        if mod not in _mod_hierarchies:
+            _mod_hierarchies[mod] = get_tc_hierarchy(mod_tcdict)
+
+        mod_hierarchy = _mod_hierarchies[mod]
         if not mod_hierarchy:
             return []
 
         # toolchain hierarchy does not contain super-toolchains, only sub-toolchains
         if ref_tcdict in mod_hierarchy or mod_tcdict in ref_hierarchy:
-            selected_mods.append(mod)
+            selected_mod_infos.append(mod_info)
 
-    return selected_mods
+    return selected_mod_infos
 
 
 def check_proc_attribute_defined(test: rfm.RegressionTest, attribute) -> bool:

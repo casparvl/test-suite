@@ -15,7 +15,7 @@ from eessi.testsuite.utils import (check_extras_key_defined, check_proc_attribut
                                    select_matching_modules)
 
 # global variables
-_buildenv_modules = []
+_buildenv_module_infos = []
 
 
 def _set_job_resources(test: rfm.RegressionTest):
@@ -454,7 +454,7 @@ def _set_or_append_valid_systems(test: rfm.RegressionTest, valid_systems: str):
         return
 
     # test.valid_systems wasn't set yet, so set it
-    if len(test.valid_systems) == 0 or test.valid_systems == [INVALID_SYSTEM]:
+    if test.valid_systems == [INVALID_SYSTEM]:
         # test.valid_systems is empty or invalid, meaning all tests are filtered out. This hook shouldn't change that
         return
     # test.valid_systems still at default value, so overwrite
@@ -517,7 +517,7 @@ def filter_valid_systems_by_device_type(test: rfm.RegressionTest, required_devic
     # Change test.valid_systems accordingly:
     _set_or_append_valid_systems(test, valid_systems)
 
-    log(f'valid_systems set to {test.valid_systems}')
+    log(f'valid_systems set to {test.valid_systems} for device type {required_device_type}')
 
 
 def filter_valid_systems_for_offline_partitions(test: rfm.RegressionTest):
@@ -642,11 +642,9 @@ def req_memory_per_node(test: rfm.RegressionTest, app_mem_req: float):
         rflog.getlogger().warning(msg)
 
 
-def set_modules(test: rfm.RegressionTest):
+def set_module_names(test: rfm.RegressionTest):
     """
-    Set modules test parameter via module_name, which can be a string or a list of strings
-    Skip current test if any of the module names is not present in the list of modules,
-    specified with --setvar modules=<comma-separated-list>.
+    Set module_names via module_name, which can be a string or a list of strings
     """
     if not test.module_name:
         return
@@ -656,14 +654,24 @@ def set_modules(test: rfm.RegressionTest):
         test.module_names = test.module_name
     else:
         raise TypeError(f'module_name is a {type(test.module_name).__name__}, should be string, list, or tuple')
+
+    log(f'module_names set to {test.module_names}')
+
+
+def set_modules(test: rfm.RegressionTest):
+    """
+    If any of the module names is not present in the list of modules,
+    (specified with --setvar modules=<comma-separated-list>), then skip current test.
+    Otherwise, set modules test parameter equal to module_names
+    """
     if test.modules:
         for name in test.module_names:
             if name not in test.modules:
-                test.valid_systems = []
+                test.valid_systems = [INVALID_SYSTEM]
                 log(f'module {name} not in {test.modules}, valid_systems set to {test.valid_systems}')
+                return
 
     test.modules = test.module_names
-    log(f'modules set to {test.modules}')
 
 
 def set_tag_scale(test: rfm.RegressionTest):
@@ -826,58 +834,67 @@ def extract_memory_usage(test: rfm.RegressionTest):
 
 def add_buildenv_module(test: rfm.RegressionTest, index=-1):
     """
-    Add a buildenv module that matches the reference module to the list of modules
+    Add a buildenv module that matches the reference module to the list of module names
 
 
     Arguments:
     - test: ReFrame test to which this hook should apply
-    - index: module index in test.modules to take as the reference (default is last);
-             note that the reference module’s toolchain should not be at the system
-             level: otherwise only buildenv modules at the system level can be added
+    - index: module index in test.module_names to take as the reference (default is last)
+             Note that the reference module’s toolchain should not be at the system
+             level: otherwise only buildenv modules at the system level can be added.
 
     Requirements:
     - recent enough easybuild python package
     - a matching default buildenv module (e.g. buildenv/default-foss-2024a) available on the system
     """
-    for mod in test.modules:
+    if test.valid_systems == [INVALID_SYSTEM]:
+        return
+
+    for mod in test.module_names:
         if mod.split('/')[0] == 'buildenv':
             # buildenv module already in the list
             return
 
     # get list of buildenv modules on the system
     # make global to avoid calculating _buildenv_modules multiple times
-    global _buildenv_modules
-    if not _buildenv_modules:
-        _buildenv_modules = set(find_modules('buildenv'))
+    global _buildenv_module_infos
+    if _buildenv_module_infos == []:
+        _buildenv_module_infos = set(find_modules('buildenv'))
         to_remove = []
-        for mod in _buildenv_modules:
-            mod_parts = split_module(mod)
+        for mod_info in _buildenv_module_infos:
+            mod_parts = split_module(mod_info[2])
             if mod_parts[4] or mod_parts[1] != 'default':
                 # only consider default buildenv modules without versionsuffixes
-                to_remove.append(mod)
+                to_remove.append(mod_info)
 
-        _buildenv_modules = [x for x in _buildenv_modules if x not in to_remove]
+        _buildenv_module_infos = [x for x in _buildenv_module_infos if x not in to_remove]
 
-        if not _buildenv_modules:
+        if not _buildenv_module_infos:
+            # set to False so we don't try to find them again
+            _buildenv_module_infos = False
             msg = 'No default buildenv modules without versionsuffixes found on the system.'
             log(msg)
             test.valid_systems = [INVALID_SYSTEM]
             return
 
-    ref_module = test.modules[index]
-    matching_modules = select_matching_modules(list(_buildenv_modules), ref_module)
+    syspart, env, _ = test.module_info
+    # only consider the buildenv modules with corresponding system:partition and programming environment
+    buildenv_mod_infos = [x for x in _buildenv_module_infos if x[0] == syspart and x[1] == env]
 
-    if not matching_modules:
-        msg = f'No matching buildenv module for {ref_module} found on the system.'
+    ref_mod_info = (syspart, env, test.module_names[index])
+
+    matching_mod_infos = select_matching_modules(list(buildenv_mod_infos), ref_mod_info)
+    if not matching_mod_infos:
+        msg = f'No matching buildenv module for {ref_mod_info} found on the system.'
         log(msg)
         test.valid_systems = [INVALID_SYSTEM]
         return
 
-    if len(matching_modules) > 1:
-        msg = f'Multiple matching buildenv modules found, will use the first one: {_buildenv_modules}.'
+    if len(matching_mod_infos) > 1:
+        msg = f'Multiple matching buildenv modules found, will use the first one: {matching_mod_infos[0]}.'
         log(msg)
 
-    buildenv_mod = matching_modules[0]
+    buildenv_mod = matching_mod_infos[0][2]
     # insert to keep the most important module last
-    test.modules.insert(0, buildenv_mod)
-    log(f'Module {buildenv_mod} added to list of modules')
+    test.module_names.insert(0, buildenv_mod)
+    log(f'module_names set to {test.module_names}')
