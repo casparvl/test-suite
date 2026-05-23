@@ -45,28 +45,28 @@ def get_blas_modules(blas_name):
     Find available blas_name module_infos with (most recent) matching BLIS module
 
     Returns: If blas_name is 'BLIS', returns the BLIS module_infos.
-             Otherwise, returns a list of tuples (syspart, env, [mod, blis]):
-             each inner list has the blas_name module as first item, and the
+             Otherwise, returns a list of tuples (syspart, env, [blas, blis]):
+             each inner list has the `blas_name` module as first item, and the
              matching BLIS module as second item.  The BLIS module must be
-             second to avoid segmentation fault for AOCL-BLAS
+             second to avoid segmentation fault for AOCL-BLAS.
     """
-    blas_module_infos = list(find_modules(rf'{blas_name}$'))
+    blas_module_infos = list(find_modules(rf'^{blas_name}$'))
     if blas_name == 'BLIS':
         return [(x, y, [z]) for x, y, z in blas_module_infos]
 
     ml_lists = []
-    blis_module_infos = list(find_modules('BLIS$'))
+    blis_module_infos = list(find_modules(r'^BLIS$'))
 
-    for mod_info in blas_module_infos:
-        matching_blis_infos = select_matching_modules(blis_module_infos, mod_info)
+    for blas_mod_info in blas_module_infos:
+        matching_blis_infos = select_matching_modules(blis_module_infos, blas_mod_info)
         if not matching_blis_infos:
-            msg = f'Skipping BLAS module info {mod_info}: no matching BLIS module found.'
+            msg = f'Skipping BLAS module info {blas_mod_info}: no matching BLIS module found.'
             getlogger().warning(msg)
             continue
         # assume the last BLIS module is the most recent one (find_modules sorts them)
         blis = matching_blis_infos[-1][-1]
-        syspart, env, mod = mod_info
-        ml_lists.append((syspart, env, [mod, blis]))
+        syspart, env, blas = blas_mod_info
+        ml_lists.append((syspart, env, [blas, blis]))
 
     return ml_lists
 
@@ -76,20 +76,23 @@ def get_imkl_modules():
     Find available imkl modules and (latest) BLIS module
     Only imkl modules with SYSTEM toolchain are used
 
-    Returns: a list of lists: each inner list has the imkl module as first item,
-             and the latest BLIS module as second item.
+    Returns: a list of tuples (syspart, env, [imkl, blis]):
+             each inner list has the imkl module as first item,
+             and the most recent BLIS module as second item.
     """
     ml_lists = []
 
-    blises = sorted(find_modules(r'BLIS$'))
-    if not blises:
+    blis_module_infos = list(find_modules(r'^BLIS$'))
+    if not blis_module_infos:
         log('no BLIS module found')
         return ml_lists
-    blis = blises[-1]
+    blis = blis_module_infos[-1][-1]
 
-    imkls = list(find_modules(r'imkl/[^-]*$', name_only=False))
-    for imkl in imkls:
-        ml_lists.append([imkl, blis])
+    # skip imkl modules with a toolchain other than SYSTEM (i.e. no toolchain in the module version)
+    imkl_module_infos = list(find_modules(r'^imkl/[^-]*$', name_only=False))
+    for imkl_mod_info in imkl_module_infos:
+        syspart, env, imkl = imkl_mod_info
+        ml_lists.append((syspart, env, [imkl, blis]))
 
     return ml_lists
 
