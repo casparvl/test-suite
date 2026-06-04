@@ -12,7 +12,7 @@
 
 import os
 
-from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
                                            set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, FEATURES, SCALES
 
@@ -112,7 +112,9 @@ partition_defaults = {
         FEATURES.CPU
     ] + list(SCALES.keys()),
     'prepare_cmds': [
-        common_eessi_init(),
+        # This system doesn't have an lmod installation by default, so source one from EESSI
+        'source /cvmfs/software.eessi.io/2025.06/init/lmod/bash',
+        'module unload EESSI',
         # Required when using srun as launcher with --export=NONE in partition access, in order to ensure job
         # steps inherit environment. It doesn't hurt to define this even if srun is not used
         'export SLURM_EXPORT_ENV=ALL'

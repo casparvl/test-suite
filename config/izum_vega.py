@@ -15,7 +15,7 @@
 
 import os
 
-from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
                                            set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, DEVICE_TYPES, FEATURES, GPU_VENDORS, SCALES
 
@@ -37,7 +37,6 @@ site_configuration = {
                     'name': 'cpu',
                     'scheduler': 'slurm',
                     'prepare_cmds': [
-                        common_eessi_init(),
                         # Pass job environment variables like $PATH, etc., into job steps
                         'export SLURM_EXPORT_ENV=ALL',
                         # Needed when using srun launcher
@@ -66,7 +65,6 @@ site_configuration = {
                     'name': 'gpu',
                     'scheduler': 'slurm',
                     'prepare_cmds': [
-                        common_eessi_init(),
                         # Pass job environment variables like $PATH, etc., into job steps
                         'export SLURM_EXPORT_ENV=ALL',
                         # Needed when using srun launcher
