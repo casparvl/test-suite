@@ -169,48 +169,16 @@ def common_general_config(prefix=None):
 
 def common_eessi_init(eessi_version=None):
     """
-    Returns the full path that should be sourced to initialize the EESSI environment for a given version of EESSI.
-    If no eessi_version is passed, the EESSI_VERSION environment variable is read.
-    If that is also not defined, default behaviour is to use `latest`.
-    :param eessi_version: version of EESSI that should be sourced (e.g. '2023.06' or 'latest') [optional]
+    Deprecated - print warning with suggested change.
     """
-    # Check which EESSI_CVMFS_REPO we are running under
-    eessi_cvmfs_repo = os.getenv('EESSI_CVMFS_REPO', None)
-
-    if eessi_cvmfs_repo is None:
-        getlogger().warning(' '.join([
-            "Environment variable 'EESSI_CVMFS_REPO' is not defined.",
-            "If you plan to use the EESSI software stack,",
-            "make sure to initialize the EESSI environment before running the test suite.",
-        ]))
-        return ''
-
-    eessi_init = []
-    pilot_repo = '/cvmfs/pilot.eessi-hpc.org'
-
-    if eessi_cvmfs_repo == pilot_repo:
-        eessi_init.append('export EESSI_FORCE_PILOT=1')
-        if eessi_version is None:
-            # Try also EESSI_VERSION for backwards compatibility with previous common_eessi_init implementation
-            eessi_version = os.getenv('EESSI_PILOT_VERSION', os.getenv('EESSI_VERSION', 'latest'))
-    else:
-        # software.eessi.io, or another where we assume the same variable names to be used
-        if eessi_version is None:
-            eessi_version = os.getenv('EESSI_VERSION', None)
-        # Without EESSI_VERSION, we don't know what to do. There is no default/latest version
-        # So, report error
-        if eessi_version is None:
-            err_msg = "Environment variable 'EESSI_VERSION' was not found."
-            err_msg += " Did you initialize the EESSI environment before running the test suite?"
-            raise ValueError(err_msg)
-
-    if eessi_cvmfs_repo == pilot_repo and eessi_version == 'latest':
-        version_string = eessi_version
-    else:
-        version_string = f'versions/{eessi_version}'
-
-    eessi_init.append(f'source {eessi_cvmfs_repo}/{version_string}/init/bash')
-    return ' && '.join(eessi_init)
+    getlogger().warning(' '.join([
+        'common_eessi_init() is deprecated, you should replace the prepare_cmds in your ReFrame configuration.'
+        ' On systems that have a module command available, you should no longer need any prepare_cmds.'
+        " On systems that don't have a module command available, you need something like"
+        " 'prepare_cmds' : ['source /cvfms/software.eessi.io/2025.06/init/lmod/bash && module unload EESSI']"
+        " in order to use the Lmod from the EESSI compatibility layer (but not yet have an EESSI version loaded)"
+    ]))
+    return 'source /cvfms/software.eessi.io/2025.06/init/lmod/bash && module unload EESSI'
 
 
 def get_sbatch_account():
