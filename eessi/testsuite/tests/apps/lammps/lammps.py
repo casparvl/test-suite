@@ -240,7 +240,7 @@ class EESSI_LAMMPS_ALL_balance_staggered_global_base(EESSI_LAMMPS_base):
     sourcesdir = 'src/ALL+OBMD'
 
     # This requires a LAMMPS with ALL functionality, i.e. only select modules with ALL in the versionsuffix
-    module_name = parameter(find_modules(r'LAMMPS\/.*-.*ALL', name_only=False))
+    module_info = parameter(find_modules(r'LAMMPS\/.*-.*ALL', name_only=False))
 
     @deferrable
     def check_number_neighbors(self):
@@ -366,7 +366,7 @@ class EESSI_LAMMPS_ALL_OBMD_simulation_staggered_global(EESSI_LAMMPS_base, EESSI
     executable = 'lmp -in in.simulation.staggered.global'
 
     # This requires a LAMMPS with ALL+OMBD functionality, i.e. only select modules with -ALL_OBMD versionsuffix
-    module_name = parameter(find_modules(r'LAMMPS\/.*-.*ALL.*OBMD', name_only=False))
+    module_info = parameter(find_modules(r'LAMMPS\/.*-.*ALL.*OBMD', name_only=False))
 
     @sanity_function
     def assert_sanity(self):
@@ -405,7 +405,7 @@ class EESSI_LAMMPS_OBMD_simulation(EESSI_LAMMPS_base, EESSI_Mixin):
 
     # This requires a LAMMPS with OBMD functionality, i.e. only select modules with -OBMD versionsuffix
     # We _could_ remove the '-' and '$' to also match e.g. ALL_OBMD
-    module_name = parameter(find_modules(r'LAMMPS\/.*-.*OBMD', name_only=False))
+    module_info = parameter(find_modules(r'LAMMPS\/.*-.*OBMD', name_only=False))
 
     @sanity_function
     def assert_sanity(self):
