@@ -15,8 +15,9 @@
 
 import os
 
-from eessi.testsuite.common_config import common_logging_config, common_general_config, common_eessi_init
-from eessi.testsuite.constants import *  # noqa: F403
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
+                                           set_common_required_config)
+from eessi.testsuite.constants import EXTRAS, DEVICE_TYPES, FEATURES, GPU_VENDORS, SCALES
 
 # This config will write all staging, output and logging to subdirs under this prefix
 # Override with RFM_PREFIX environment variable
@@ -41,20 +42,9 @@ site_configuration = {
                 {
                     'name': 'rome',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p rome', '--export=None'],
-                    'environs': ['default'],
                     'max_jobs': 120,
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'features': [
                         FEATURES.CPU,
                     ] + list(SCALES.keys()),
@@ -68,25 +58,9 @@ site_configuration = {
                 {
                     'name': 'genoa',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [
-                        # EESSI init script (for now) falls back to zen3, since the zen4 is incomplete
-                        # But, we want to really test the zen4 branch on these nodes
-                        'export EESSI_SOFTWARE_SUBDIR_OVERRIDE=x86_64/amd/zen4',
-                        common_eessi_init()
-                    ],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p genoa', '--export=None'],
-                    'environs': ['default'],
                     'max_jobs': 120,
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'features': [
                         FEATURES.CPU,
                     ] + list(SCALES.keys()),
@@ -100,28 +74,13 @@ site_configuration = {
                 {
                     'name': 'gpu_A100',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p gpu_a100', '--export=None'],
-                    'environs': ['default'],
                     'max_jobs': 60,
                     'devices': [
                         {
                             'type': DEVICE_TYPES.GPU,
                             'num_devices': 4,
-                        }
-                    ],
-                    'resources': [
-                        {
-                            'name': '_rfm_gpu',
-                            'options': ['--gpus-per-node={num_gpus_per_node}'],
-                        },
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
                         }
                     ],
                     'features': [
@@ -139,28 +98,13 @@ site_configuration = {
                 {
                     'name': 'gpu_H100',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p gpu_h100', '--export=None'],
-                    'environs': ['default'],
                     'max_jobs': 60,
                     'devices': [
                         {
                             'type': DEVICE_TYPES.GPU,
                             'num_devices': 4,
-                        }
-                    ],
-                    'resources': [
-                        {
-                            'name': '_rfm_gpu',
-                            'options': ['--gpus-per-node={num_gpus_per_node}'],
-                        },
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
                         }
                     ],
                     'features': [
@@ -179,14 +123,6 @@ site_configuration = {
             ]
         },
     ],
-    'environments': [
-        {
-            'name': 'default',
-            'cc': 'cc',
-            'cxx': '',
-            'ftn': '',
-        },
-    ],
     'logging': common_logging_config(reframe_prefix),
     'general': [
         {
@@ -197,3 +133,6 @@ site_configuration = {
         }
     ],
 }
+
+# Set common Slurm config options
+set_common_required_config(site_configuration)

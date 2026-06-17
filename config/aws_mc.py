@@ -12,7 +12,8 @@
 
 import os
 
-from eessi.testsuite.common_config import common_logging_config, common_general_config, common_eessi_init
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
+                                           set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, FEATURES, SCALES
 
 # This config will write all staging, output and logging to subdirs under this prefix
@@ -45,6 +46,21 @@ site_configuration = {
                     'descr': 'Skylake, 16 cores, 30 GB',
                 },
                 {
+                    'name': 'x86_64-cascadelake-16c-64gb',
+                    'access': ['--partition=x86-64-intel-caslake-node', '--export=NONE'],
+                    'descr': 'Cascadelake, 16 cores, 64 GB',
+                },
+                {
+                    'name': 'x86_64-icelake-16c-32gb',
+                    'access': ['--partition=x86-64-intel-icelake-node', '--export=NONE'],
+                    'descr': 'Icelake, 16 cores, 32 GB',
+                },
+                {
+                    'name': 'x86_64-sapphirerapids-16c-32gb',
+                    'access': ['--partition=x86-64-intel-srapids-node', '--export=NONE'],
+                    'descr': 'Sapphire Rapids, 16 cores, 32 GB',
+                },
+                {
                     'name': 'x86_64-zen2-16c-30gb',
                     'access': ['--partition=x86-64-amd-zen2-node', '--export=NONE'],
                     'descr': 'Zen2, 16 cores, 30 GB',
@@ -53,6 +69,11 @@ site_configuration = {
                     'name': 'x86_64-zen3-16c-30gb',
                     'access': ['--partition=x86-64-amd-zen3-node', '--export=NONE'],
                     'descr': 'Zen3, 16 cores, 30 GiB',
+                },
+                {
+                    'name': 'x86_64-zen4-16c-32gb',
+                    'access': ['--partition=x86-64-amd-zen4-node', '--export=NONE'],
+                    'descr': 'Zen4, 16 cores, 32 GiB',
                 },
                 {
                     'name': 'aarch64-generic-16c-32gb',
@@ -72,14 +93,6 @@ site_configuration = {
             ]
         },
     ],
-    'environments': [
-        {
-            'name': 'default',
-            'cc': 'cc',
-            'cxx': '',
-            'ftn': '',
-        },
-    ],
     'logging': common_logging_config(reframe_prefix),
     'general': [
         {
@@ -95,21 +108,16 @@ site_configuration = {
 partition_defaults = {
     'scheduler': 'slurm',
     'launcher': 'mpirun',
-    'environs': ['default'],
     'features': [
         FEATURES.CPU
     ] + list(SCALES.keys()),
     'prepare_cmds': [
-        common_eessi_init(),
+        # This system doesn't have an lmod installation by default, so source one from EESSI
+        'source /cvmfs/software.eessi.io/2025.06/init/lmod/bash',
+        'module unload EESSI',
         # Required when using srun as launcher with --export=NONE in partition access, in order to ensure job
         # steps inherit environment. It doesn't hurt to define this even if srun is not used
         'export SLURM_EXPORT_ENV=ALL'
-    ],
-    'resources': [
-        {
-            'name': 'memory',
-            'options': ['--mem={size}'],
-        }
     ],
     'extras': {
         # Node types have somewhat varying amounts of memory, but we'll make it easy on ourselves
@@ -121,3 +129,6 @@ partition_defaults = {
 for system in site_configuration['systems']:
     for partition in system['partitions']:
         partition.update(partition_defaults)
+
+# Set common Slurm config options
+set_common_required_config(site_configuration)

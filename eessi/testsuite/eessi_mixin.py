@@ -2,15 +2,19 @@ import os
 
 from reframe.core.backends import getlauncher
 from reframe.core.builtins import parameter, run_after, run_before, variable
-from reframe.core.exceptions import ReframeFatalError
 from reframe.core.logging import getlogger
-from reframe.core.pipeline import RegressionMixin
+try:
+    from reframe.core.pipeline import RegressionTestPlugin
+except ImportError:
+    from reframe.core.pipeline import RegressionMixin as RegressionTestPlugin
 from reframe.utility.sanity import make_performance_function
 import reframe.utility.sanity as sn
+from reframe.core.runtime import valid_sysenv_comb
+from reframe import VERSION as reframe_version
 
-from eessi.testsuite import hooks
-from eessi.testsuite.constants import DEVICE_TYPES, SCALES, COMPUTE_UNITS, TAGS
-from eessi.testsuite.utils import log
+from eessi.testsuite import check_process_binding, hooks
+from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES, INVALID_SYSTEM, SCALES, TAGS
+from eessi.testsuite.utils import EESSIError, log, log_once
 from eessi.testsuite import __version__ as testsuite_version
 
 
@@ -27,19 +31,19 @@ from eessi.testsuite import __version__ as testsuite_version
 # Maybe we can move those to an __init__ step of the Mixin, even though that is not typically how ReFrame
 # does it anymore?
 # That way, the child class could define it as class variables, and the parent can use it in its __init__ method?
-class EESSI_Mixin(RegressionMixin):
+class EESSI_Mixin(RegressionTestPlugin):
     """
     All EESSI tests should derive from this mixin class unless they have a very good reason not to.
     To run correctly, tests inheriting from this class need to define variables and parameters that are used here.
     That definition needs to be done 'on time', i.e. early enough in the execution of the ReFrame pipeline.
     Here, we list which class attributes must be defined by the child class, and by (the end of) what phase:
 
-    - Init phase: device_type, scale, module_name, bench_name (if bench_name_ci is set)
+    - Init phase: device_type, scale, module_info, bench_name
     - Setup phase: compute_unit, required_mem_per_node
 
     The child class may also overwrite the following attributes:
 
-    - Init phase: time_limit, measure_memory_usage, bench_name_ci, all_readonly_files
+    - Init phase: time_limit, measure_memory_usage, all_readonly_files
     """
 
     # Defaults for ReFrame variables that can be overwritten on the cmd line
@@ -47,13 +51,15 @@ class EESSI_Mixin(RegressionMixin):
     exact_memory = variable(bool, value=False)
     user_executable_opts = variable(str, value='')
     thread_binding = variable(str, value='false')
+    required_mem_per_node_undefined_policy = variable(str, value='warning')
+    readonly_files_undefined_policy = variable(str, value='warning')
 
     # Set defaults for these class variables, can be overwritten by child class if desired
     scale = parameter(SCALES.keys())
     bench_name = None
-    bench_name_ci = None
     is_ci_test = False
     num_tasks_per_compute_unit = 1
+    used_cpus_per_task = None  # actually used cpus per task
     always_request_gpus = None
     require_buildenv_module = False
     require_internet = False
@@ -71,26 +77,22 @@ class EESSI_Mixin(RegressionMixin):
     # Make sure the version of the EESSI test suite gets logged in the ReFrame report
     eessi_testsuite_version = variable(str, value=testsuite_version)
 
+    # Check process binding in a prerun cmd
+    check_process_binding = variable(bool, value=True)
+
     # Note that the error for an empty parameter is a bit unclear for ReFrame 4.6.2, but that will hopefully improve
     # see https://github.com/reframe-hpc/reframe/issues/3254
-    # If that improves: uncomment the following to force the user to set module_name
-    # module_name = parameter()
+    # If that improves: uncomment the following to force the user to set module_info
+    # module_info = parameter()
 
     def __init_subclass__(cls, **kwargs):
         " set default values for built-in ReFrame attributes "
         super().__init_subclass__(**kwargs)
-        cls.valid_prog_environs = ['default']
+        cls.valid_prog_environs = ['*']
         cls.valid_systems = ['*']
         if not cls.time_limit:
             cls.time_limit = '1h'
-        if not (cls.readonly_files or cls.all_readonly_files):
-            msg = ' '.join([
-                "Built-in attribute `readonly_files` is empty. To avoid excessive copying, it's highly recommended",
-                "to add all files and/or dirs in `sourcesdir` that are needed but not modified during the test,",
-                "thus can be symlinked into the stage dirs. If you are sure there are no such files,",
-                "set `readonly_files = ['']`.",
-            ])
-            raise ReframeFatalError(msg)
+
         if cls._rfm_local_param_space.get('scale'):
             getlogger().verbose(f"Scales supported by {cls.__qualname__}: {cls._rfm_local_param_space['scale'].values}")
 
@@ -107,31 +109,48 @@ class EESSI_Mixin(RegressionMixin):
                 msg = f"The variable '{item}' has value {value}, but the only valid value is {valid_items[0]}"
             else:
                 msg = f"The variable '{item}' has value {value}, but the only valid values are {valid_items}"
-            raise ReframeFatalError(msg)
+            raise EESSIError(msg)
+
+    @run_after('init')
+    def EESSI_check_readonly_files(self):
+        # This check must occur after init phase to support setting `readonly_files_undefined_policy` on the cmd line
+        if not (self.readonly_files or self.all_readonly_files):
+            msg = ' '.join([
+                "Built-in attribute `readonly_files` is empty. To avoid excessive copying, it's highly recommended",
+                "to add all files and/or dirs in `sourcesdir` that are needed but not modified during the test,",
+                "thus can be symlinked into the stage dirs. If you are sure there are no such files,",
+                "set `readonly_files = ['']`. To symlink all files in `sourcesdir`, set `all_readonly_files = True`.",
+            ])
+            if self.readonly_files_undefined_policy == 'error':
+                raise EESSIError(msg)
+            log_once(self, msg, msg_id='1', level=self.readonly_files_undefined_policy)
 
     @run_after('init')
     def mark_all_files_readonly(self):
         """Mark all files in the sourcesdir as read-only"""
         if self.all_readonly_files:
-            self.readonly_files = os.listdir(self.sourcesdir)
+            if os.path.isabs(self.sourcesdir):
+                path = self.sourcesdir
+            else:
+                path = os.path.join(self.prefix, self.sourcesdir)
+            self.readonly_files = os.listdir(path)
 
     @run_after('init')
     def EESSI_mixin_validate_init(self):
         """Check that all variables that have to be set for subsequent hooks in the init phase have been set"""
         # List which variables we will need/use in the run_after('init') hooks
-        var_list = ['device_type', 'scale', 'module_name', 'measure_memory_usage']
+        var_list = ['device_type', 'scale', 'module_info', 'measure_memory_usage']
         for var in var_list:
             if not hasattr(self, var):
                 msg = "The variable '%s' should be defined in any test class that inherits" % var
                 msg += " from EESSI_Mixin before (or in) the init phase, but it wasn't"
-                raise ReframeFatalError(msg)
+                raise EESSIError(msg)
 
         # Check that the value for these variables is valid,
         # i.e. exists in their respective dict from eessi.testsuite.constants
         self.EESSI_mixin_validate_item_in_list('device_type', DEVICE_TYPES[:])
         self.EESSI_mixin_validate_item_in_list('scale', SCALES.keys())
         self.EESSI_mixin_validate_item_in_list('valid_systems', [['*']])
-        self.EESSI_mixin_validate_item_in_list('valid_prog_environs', [['default']])
 
     @run_after('init')
     def EESSI_mixin_run_after_init(self):
@@ -144,19 +163,55 @@ class EESSI_Mixin(RegressionMixin):
         # Filter on which scales are supported by the partitions defined in the ReFrame configuration
         hooks.filter_supported_scales(self)
 
-        hooks.set_modules(self)
-
-        if self.require_buildenv_module:
-            hooks.add_buildenv_module(self)
-
         thread_binding = self.thread_binding.lower()
         if thread_binding in ('true', 'compact'):
             hooks.set_compact_thread_binding(self)
         elif thread_binding != 'false':
             err_msg = f"Invalid thread_binding value '{thread_binding}'. Valid values: 'true', 'compact', or 'false'."
-            raise ReframeFatalError(err_msg)
+            raise EESSIError(err_msg)
 
-        hooks.filter_valid_systems_by_device_type(self, required_device_type=self.device_type)
+        # Unpack module_info
+        syspart, env, mod = self.module_info
+        self.valid_prog_environs = [env]
+        self.module_name = mod
+
+        # Set module_names
+        hooks.set_module_names(self)
+
+        # Add buildenv module if requested
+        if self.require_buildenv_module:
+            hooks.add_buildenv_module(self)
+
+        # Set modules
+        hooks.set_modules(self)
+
+        # Checks reframe version, and if newer or equal to 4.10, use the new functionality
+        # that allows combining sys:part notation with +feat.
+        syspart_feat_supported = False
+        try:
+            import semver
+            if semver.VersionInfo.parse(reframe_version) >= semver.VersionInfo.parse("4.10.0"):
+                syspart_feat_supported = True
+        except ImportError:
+            pass
+
+        # If we use reframe 4.10.0 or later, we can just set the valid system and the hook will
+        # append any relevant features. Otherwise, as a fallback, we set the features first
+        # (by calling the hook), then check if the sys:part combination from the find_modules triplet
+        # is in the list of valid combinations for the given features
+        if syspart_feat_supported:
+            self.valid_systems = [syspart]
+            hooks.filter_valid_systems_by_device_type(self, required_device_type=self.device_type)
+        else:
+            # Filter by defice type. E.g. add features based on whether CUDA appears in the module name
+            hooks.filter_valid_systems_by_device_type(self, required_device_type=self.device_type)
+
+            # Check if partitions returned by find_modules satisfy the current features/extras in valid_systems
+            valid_partitions = [part.fullname for part in valid_sysenv_comb(self.valid_systems, env)]
+            if syspart in valid_partitions:
+                self.valid_systems = [syspart]
+            else:
+                self.valid_systems = [INVALID_SYSTEM]
 
         # Set scales as tags
         hooks.set_tag_scale(self)
@@ -172,20 +227,13 @@ class EESSI_Mixin(RegressionMixin):
     @run_after('init', always_last=True)
     def EESSI_mixin_set_tag_ci(self):
         """
-        Set CI tag if is_ci_test is True or (bench_name_ci and bench_name are set and are equal)
+        Set CI tag if is_ci_test is True
         Also set tag on bench_name if set
         """
         tags_added = False
         if self.is_ci_test:
             self.tags.add(TAGS.CI)
             tags_added = True
-        elif self.bench_name_ci:
-            if not self.bench_name:
-                msg = "Attribute bench_name_ci is set, but bench_name is not set"
-                raise ReframeFatalError(msg)
-            if self.bench_name == self.bench_name_ci:
-                self.tags.add(TAGS.CI)
-                tags_added = True
         if self.bench_name:
             self.tags.add(self.bench_name)
             tags_added = True
@@ -200,7 +248,7 @@ class EESSI_Mixin(RegressionMixin):
             if not hasattr(self, var):
                 msg = "The variable '%s' should be defined in any test class that inherits" % var
                 msg += " from EESSI_Mixin before (or in) the setup phase, but it wasn't"
-                raise ReframeFatalError(msg)
+                raise EESSIError(msg)
 
         # Check if mem_func was defined to compute the required memory per node as function of the number of
         # tasks per node
@@ -209,7 +257,9 @@ class EESSI_Mixin(RegressionMixin):
             msg += " from EESSI_Mixin before (or in) the setup phase, but it wasn't. Note that this function"
             msg += " can use self.num_tasks_per_node, as it will be called after that attribute"
             msg += " has been set."
-            raise ReframeFatalError(msg)
+            if self.required_mem_per_node_undefined_policy == 'error':
+                raise EESSIError(msg)
+            log_once(self, msg, msg_id='2', level=self.required_mem_per_node_undefined_policy)
 
         # Check that the value for these variables is valid
         # i.e. exists in their respective dict from eessi.testsuite.constants
@@ -218,8 +268,7 @@ class EESSI_Mixin(RegressionMixin):
     @run_after('setup')
     def EESSI_mixin_assign_tasks_per_compute_unit(self):
         """Call hooks to assign tasks per compute unit, set OMP_NUM_THREADS, and set compact process binding"""
-        hooks.assign_tasks_per_compute_unit(test=self, compute_unit=self.compute_unit,
-                                            num_per=self.num_tasks_per_compute_unit)
+        hooks.assign_tasks_per_compute_unit(self)
 
         # Set OMP_NUM_THREADS environment variable
         hooks.set_omp_num_threads(self)
@@ -236,7 +285,8 @@ class EESSI_Mixin(RegressionMixin):
     @run_after('setup')
     def EESSI_mixin_request_mem(self):
         """Call hook to request the required amount of memory per node"""
-        hooks.req_memory_per_node(self, app_mem_req=self.required_mem_per_node())
+        if hasattr(self, 'required_mem_per_node'):
+            hooks.req_memory_per_node(self, app_mem_req=self.required_mem_per_node())
 
     @run_after('setup')
     def EESSI_mixin_log_runtime_info(self):
@@ -257,6 +307,27 @@ class EESSI_Mixin(RegressionMixin):
             log(f'Overwriting executable_opts {self.executable_opts} by executable_opts '
                 'specified on cmd line {[self.user_executable_opts]}')
             self.executable_opts = [self.user_executable_opts]
+
+    @run_before('run', always_last=True)
+    def EESSI_check_proc_binding(self):
+        """Check process binding in a pre-run cmd. Result is written into job error file."""
+        if not self.check_process_binding:
+            return
+        check_binding_script = check_process_binding.__file__
+        get_binding = os.path.join(os.path.dirname(check_binding_script), 'get_process_binding.sh')
+        check_binding = ' '.join([
+            f'{check_binding_script}',
+            f'--cpus-per-proc {self.used_cpus_per_task}',
+            f'--procs {self.num_tasks}',
+            f'--nodes {self.num_tasks // self.num_tasks_per_node}',
+        ])
+        self.prerun_cmds.extend([
+            "if command -v hwloc-calc >/dev/null; then",
+            f"{self.job.launcher.run_command(self.job)} {get_binding} | tee /dev/stderr | {check_binding}",
+            "else",
+            "echo 'PROCESS BINDING WARNING: hwloc not available, skipping process binding check' >/dev/stderr",
+            "fi",
+        ])
 
     @run_after('run')
     def EESSI_mixin_extract_runtime_info_from_log(self):
@@ -279,3 +350,15 @@ class EESSI_Mixin(RegressionMixin):
                                     'modpath', str)
         if module_path:
             self.full_modulepath = f'{module_path}'
+
+    @run_after('run')
+    def EESSI_mixin_extract_errors_warnings(self):
+        """Extract the printed errors and warnings from the job error file and log them"""
+        if self.is_dry_run() or self.check_process_binding is False:
+            return
+
+        messages = sn.extractall(r'PROCESS BINDING ERROR: .*', f'{self.stagedir}/{self.stderr}')
+        messages += sn.extractall(r'PROCESS BINDING WARNING: .*', f'{self.stagedir}/{self.stderr}')
+        if messages:
+            for msg in messages:
+                getlogger().warning(msg)

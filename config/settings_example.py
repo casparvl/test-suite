@@ -19,7 +19,8 @@ Example configuration file
 """
 import os
 
-from eessi.testsuite.common_config import common_logging_config, common_general_config, common_eessi_init
+from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+                                           set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, FEATURES, SCALES, DEVICE_TYPES, GPU_VENDORS
 
 
@@ -40,11 +41,15 @@ site_configuration = {
                     'launcher': 'mpirun',
                     'access': ['-p cpu', '--export=None'],
                     'prepare_cmds': [
-                        common_eessi_init(),
+                        # If your system doesn't have an Lmod installation by default on the batch nodes
+                        # Uncommenting the following two lines will use one from EESSI. Note that it is up to you
+                        # to pick a version for EESSI from which you'd like to use the lmod installation - it's
+                        # hard-coded to 2025.06 here.
+                        # 'source /cvmfs/software.eessi.io/2025.06/init/lmod/bash',
+                        # 'module unload EESSI',
                         # Pass job environment variables like $PATH, etc., into job steps
                         'export SLURM_EXPORT_ENV=ALL',
                     ],
-                    'environs': ['default'],
                     'max_jobs': 4,
                     # We recommend to rely on ReFrame's CPU autodetection,
                     # and only define the 'processor' field if autodetection fails
@@ -54,12 +59,6 @@ site_configuration = {
                     #     'num_cpus_per_socket': 64,
                     #     'num_cpus_per_core': 1,
                     # },
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'extras': {
                         # If you have slurm, check with scontrol show node <nodename> for the amount of RealMemory
                         # on nodes in this partition
@@ -82,7 +81,6 @@ site_configuration = {
                         # Pass job environment variables like $PATH, etc., into job steps
                         'export SLURM_EXPORT_ENV=ALL',
                     ],
-                    'environs': ['default'],
                     'max_jobs': 4,
                     # We recommend to rely on ReFrame's CPU autodetection,
                     # and only define the 'processor' field if autodetection fails
@@ -92,16 +90,6 @@ site_configuration = {
                     #     'num_cpus_per_socket': 36,
                     #     'num_cpus_per_core': 1,
                     # },
-                    'resources': [
-                        {
-                            'name': '_rfm_gpu',
-                            'options': ['--gpus-per-node={num_gpus_per_node}'],
-                        },
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'devices': [
                         {
                             'type': DEVICE_TYPES.GPU,
@@ -124,14 +112,6 @@ site_configuration = {
             ]
         },
     ],
-    'environments': [
-        {
-            'name': 'default',
-            'cc': 'cc',
-            'cxx': '',
-            'ftn': '',
-        },
-    ],
     'logging': common_logging_config(),
     'general': [
         {
@@ -142,3 +122,6 @@ site_configuration = {
         }
     ],
 }
+
+# Set common Slurm config options
+set_common_required_config(site_configuration)

@@ -2,6 +2,7 @@
 Hooks for adding tags, filtering and setting job resources in ReFrame tests
 """
 import math
+import re
 
 import reframe as rfm
 import reframe.core.logging as rflog
@@ -14,7 +15,21 @@ from eessi.testsuite.utils import (check_extras_key_defined, check_proc_attribut
                                    select_matching_modules)
 
 # global variables
-_buildenv_modules = []
+_buildenv_module_infos = []
+
+
+def _set_job_resources(test: rfm.RegressionTest):
+    "Set job resources"
+    # This is needed to get the correct launcher run_command with `self.job.launcher.run_command(self.job)`.
+    # ReFrame already sets job resources during the run step,
+    # but some hooks use the launcher run_command before the run step.
+    # See the `run` method of the `RegressionTest` class in reframe/core/pipeline.py
+    test.job.num_tasks = test.num_tasks
+    test.job.num_tasks_per_node = test.num_tasks_per_node
+    test.job.num_tasks_per_core = test.num_tasks_per_core
+    test.job.num_tasks_per_socket = test.num_tasks_per_socket
+    test.job.num_cpus_per_task = test.num_cpus_per_task
+    test.job.use_smt = test.use_multithreading
 
 
 def _assign_default_num_cpus_per_node(test: rfm.RegressionTest):
@@ -62,7 +77,7 @@ def _assign_default_num_gpus_per_node(test: rfm.RegressionTest):
     log(f'default_num_gpus_per_node set to {test.default_num_gpus_per_node}')
 
 
-def assign_tasks_per_compute_unit(test: rfm.RegressionTest, compute_unit: str, num_per: int = 1):
+def assign_tasks_per_compute_unit(test: rfm.RegressionTest):
     """
     Assign one task per compute unit. More than 1 task per compute unit can be assigned with
     num_per for compute units that support it.
@@ -78,16 +93,26 @@ def assign_tasks_per_compute_unit(test: rfm.RegressionTest, compute_unit: str, n
 
     Arguments:
     - test: the ReFrame test to which this hook should apply
+
+    The following test attributes must be set:
     - compute_unit: a device as listed in eessi.testsuite.constants.COMPUTE_UNITS
+    - num_tasks_per_compute_unit: the number of tasks per compute unit
 
     Examples:
     On a single node with 2 sockets, 64 cores and 128 hyperthreads:
-    - assign_tasks_per_compute_unit(test, COMPUTE_UNITS.HWTHREAD) will launch 128 tasks with 1 thread per task
-    - assign_tasks_per_compute_unit(test, COMPUTE_UNITS.CPU) will launch 64 tasks with 2 threads per task
-    - assign_tasks_per_compute_unit(test, COMPUTE_UNITS.CPU_SOCKET) will launch 2 tasks with 64 threads per task
+    - test.compute_unit = COMPUTE_UNITS.HWTHREAD will launch 128 tasks with 1 thread per task
+    - test.compute_unit = COMPUTE_UNITS.CPU will launch 64 tasks with 2 threads per task
+    - test.compute_unit = COMPUTE_UNITS.CPU_SOCKET will launch 2 tasks with 64 threads per task
 
     """
-    log(f'assign_tasks_per_compute_unit called with compute_unit: {compute_unit} and num_per: {num_per}')
+    for attribute in ['compute_unit', 'num_tasks_per_compute_unit']:
+        if not hasattr(test, attribute):
+            raise NotImplementedError(
+                f'test attribute {attribute} must be defined before calling assign_tasks_per_compute_unit')
+
+    compute_unit = test.compute_unit
+    num_per = test.num_tasks_per_compute_unit
+    log(f'assign_tasks_per_compute_unit with compute_unit: {compute_unit} and num_per: {num_per}')
 
     if num_per != 1 and compute_unit not in [COMPUTE_UNITS.NODE]:
         raise NotImplementedError(
@@ -135,23 +160,32 @@ def assign_tasks_per_compute_unit(test: rfm.RegressionTest, compute_unit: str, n
     elif compute_unit == COMPUTE_UNITS.NUMA_NODE:
         _assign_one_task_per_numa_node(test)
     elif compute_unit == COMPUTE_UNITS.NODE:
-        _assign_num_tasks_per_node(test, num_per)
+        _assign_num_tasks_per_node(test)
     else:
         raise ValueError(f'compute unit {compute_unit} is currently not supported')
 
     _check_always_request_gpus(test)
 
+    if not test.used_cpus_per_task:
+        test.used_cpus_per_task = test.num_cpus_per_task
+
     if test.current_partition.launcher_type().registered_name == 'srun':
+        # Don’t let srun launcher set --cpus-per-task
+        test.job.launcher.use_cpus_per_task = False
+        # Add --cpus-per-task to srun launcher
+        test.job.launcher.options += [f'--cpus-per-task={test.used_cpus_per_task}']
         # Make sure srun inherits --cpus-per-task from the job environment for Slurm versions >= 22.05 < 23.11,
         # ensuring the same task binding across all Slurm versions.
         # https://bugs.schedmd.com/show_bug.cgi?id=13351
         # https://bugs.schedmd.com/show_bug.cgi?id=11275
         # https://bugs.schedmd.com/show_bug.cgi?id=15632#c43
-        test.env_vars['SRUN_CPUS_PER_TASK'] = test.num_cpus_per_task
+        test.env_vars['SRUN_CPUS_PER_TASK'] = test.used_cpus_per_task
         log(f'Set environment variable SRUN_CPUS_PER_TASK to {test.env_vars["SRUN_CPUS_PER_TASK"]}')
 
+    _set_job_resources(test)
 
-def _assign_num_tasks_per_node(test: rfm.RegressionTest, num_per: int = 1):
+
+def _assign_num_tasks_per_node(test: rfm.RegressionTest):
     """
     Sets num_tasks_per_node and num_cpus_per_task such that it will run
     'num_per' tasks per node, unless specified with:
@@ -166,6 +200,7 @@ def _assign_num_tasks_per_node(test: rfm.RegressionTest, num_per: int = 1):
     - num_tasks_per_node = num_per
     - num_cpus_per_task = test.default_num_cpus_per_node / num_tasks_per_node
     """
+    num_per = test.num_tasks_per_compute_unit
 
     # neither num_tasks_per_node nor num_cpus_per_task are set
     if not test.num_tasks_per_node and not test.num_cpus_per_task:
@@ -427,7 +462,7 @@ def _set_or_append_valid_systems(test: rfm.RegressionTest, valid_systems: str):
         return
 
     # test.valid_systems wasn't set yet, so set it
-    if len(test.valid_systems) == 0 or test.valid_systems == [INVALID_SYSTEM]:
+    if test.valid_systems == [INVALID_SYSTEM]:
         # test.valid_systems is empty or invalid, meaning all tests are filtered out. This hook shouldn't change that
         return
     # test.valid_systems still at default value, so overwrite
@@ -490,7 +525,7 @@ def filter_valid_systems_by_device_type(test: rfm.RegressionTest, required_devic
     # Change test.valid_systems accordingly:
     _set_or_append_valid_systems(test, valid_systems)
 
-    log(f'valid_systems set to {test.valid_systems}')
+    log(f'valid_systems set to {test.valid_systems} for device type {required_device_type}')
 
 
 def filter_valid_systems_for_offline_partitions(test: rfm.RegressionTest):
@@ -615,11 +650,9 @@ def req_memory_per_node(test: rfm.RegressionTest, app_mem_req: float):
         rflog.getlogger().warning(msg)
 
 
-def set_modules(test: rfm.RegressionTest):
+def set_module_names(test: rfm.RegressionTest):
     """
-    Set modules test parameter via module_name, which can be a string or a list of strings
-    Skip current test if any of the module names is not present in the list of modules,
-    specified with --setvar modules=<comma-separated-list>.
+    Set module_names via module_name, which can be a string or a list of strings
     """
     if not test.module_name:
         return
@@ -629,14 +662,24 @@ def set_modules(test: rfm.RegressionTest):
         test.module_names = test.module_name
     else:
         raise TypeError(f'module_name is a {type(test.module_name).__name__}, should be string, list, or tuple')
+
+    log(f'module_names set to {test.module_names}')
+
+
+def set_modules(test: rfm.RegressionTest):
+    """
+    If any of the module names is not present in the list of modules,
+    (specified with --setvar modules=<comma-separated-list>), then skip current test.
+    Otherwise, set modules test parameter equal to module_names
+    """
     if test.modules:
         for name in test.module_names:
             if name not in test.modules:
-                test.valid_systems = []
+                test.valid_systems = [INVALID_SYSTEM]
                 log(f'module {name} not in {test.modules}, valid_systems set to {test.valid_systems}')
+                return
 
     test.modules = test.module_names
-    log(f'modules set to {test.modules}')
 
 
 def set_tag_scale(test: rfm.RegressionTest):
@@ -667,7 +710,7 @@ def set_compact_process_binding(test: rfm.RegressionTest):
 
     It is hard to do this in a portable way. Currently supported for process binding are:
     - Intel MPI (through I_MPI_PIN_DOMAIN)
-    - OpenMPI (through OMPI_MCA_rmaps_base_mapping_policy)
+    - OpenMPI (through cmdline option --map-by slot:PE=x)
     - srun (LIMITED SUPPORT: through SLURM_CPU_BIND, but only effective if task/affinity plugin is enabled)
     """
 
@@ -676,32 +719,47 @@ def set_compact_process_binding(test: rfm.RegressionTest):
     # TODO: check if this also leads to sensible binding when using COMPUTE_UNITS.HWTHREAD
     check_proc_attribute_defined(test, 'num_cpus_per_core')
     num_cpus_per_core = test.current_partition.processor.num_cpus_per_core
-    physical_cpus_per_task = int(test.num_cpus_per_task / num_cpus_per_core)
+    physical_cpus_per_task = int(test.used_cpus_per_task / num_cpus_per_core)
+    launcher = test.current_partition.launcher_type().registered_name
 
-    if test.current_partition.launcher_type().registered_name == 'mpirun':
+    if launcher == 'mpirun':
         # Do binding for intel and OpenMPI's mpirun, and srun
-        test.env_vars['I_MPI_PIN_CELL'] = 'core'  # Don't bind to hyperthreads, only to physcial cores
-        test.env_vars['I_MPI_PIN_DOMAIN'] = '%s:compact' % physical_cpus_per_task
-        test.env_vars['OMPI_MCA_rmaps_base_mapping_policy'] = 'slot:PE=%s' % physical_cpus_per_task
-        log(f'Set environment variable I_MPI_PIN_CELL to {test.env_vars["I_MPI_PIN_CELL"]}')
-        log(f'Set environment variable I_MPI_PIN_DOMAIN to {test.env_vars["I_MPI_PIN_DOMAIN"]}')
-        log('Set environment variable OMPI_MCA_rmaps_base_mapping_policy to '
-            f'{test.env_vars["OMPI_MCA_rmaps_base_mapping_policy"]}')
-    elif test.current_partition.launcher_type().registered_name == 'srun':
+        env_vars = {
+            'I_MPI_PIN_CELL': 'core',  # Don't bind to hyperthreads, only to physcial cores
+            'I_MPI_PIN_DOMAIN': f'{physical_cpus_per_task}:compact',
+            'I_MPI_DEBUG': '4',
+        }
+        ompi_patterns = [
+            r'.+/.+-gompi-', r'^gompi/',
+            r'.+/.+-foss-', r'^foss/',
+            r'.+/.+-gomkl-', r'^gomkl/',
+            r'.+/.+-iomkl-', r'^iomkl/',
+            r'.+/.+-lompi-', r'^lompi/',
+            r'.+/.+-lfoss-', r'^lfoss/',
+            r'^OpenMPI/']
+        pattern = "|".join(ompi_patterns)
+        if any(re.search(pattern, x) for x in test.modules):
+            test.job.launcher.options.append(f'--map-by slot:PE={physical_cpus_per_task} --report-bindings')
+            log(f'Set launcher command to {test.job.launcher.run_command(test.job)}')
+    elif launcher == 'srun':
         # Set compact binding for SLURM. Only effective if the task/affinity plugin is enabled
         # and when number of tasks times cpus per task equals either socket, core or thread count
-        test.env_vars['SLURM_DISTRIBUTION'] = 'block:block'
-        test.env_vars['SLURM_CPU_BIND'] = 'verbose'
-        log(f'Set environment variable SLURM_DISTRIBUTION to {test.env_vars["SLURM_DISTRIBUTION"]}')
-        log(f'Set environment variable SLURM_CPU_BIND to {test.env_vars["SLURM_CPU_BIND"]}')
+        env_vars = {
+            'SLURM_DISTRIBUTION': 'block:block',
+            'SLURM_CPU_BIND': 'verbose,cores',
+        }
     else:
-        msg = "hooks.set_compact_process_binding does not support the current launcher"
-        msg += f" ({test.current_partition.launcher_type().registered_name})."
+        env_vars = {}
+        msg = f"hooks.set_compact_process_binding does not support the current launcher ({launcher})."
         msg += " The test will run, but using the default binding strategy of your parallel launcher."
         msg += " This may lead to suboptimal performance."
         msg += " Please expand the functionality of hooks.set_compact_process_binding for your parallel launcher."
         # Warnings will, at default loglevel, be printed on stdout when executing the ReFrame command
         rflog.getlogger().warning(msg)
+
+    for key, value in env_vars.items():
+        test.env_vars[key] = value
+        log(f'Set environment variable {key} to {test.env_vars[key]}')
 
 
 def set_compact_thread_binding(test: rfm.RegressionTest):
@@ -728,7 +786,7 @@ def set_omp_num_threads(test: rfm.RegressionTest):
     """
     Set number of OpenMP threads equal to number of CPUs per task
     """
-    test.env_vars['OMP_NUM_THREADS'] = test.num_cpus_per_task
+    test.env_vars['OMP_NUM_THREADS'] = test.used_cpus_per_task
     log(f'Set environment variable OMP_NUM_THREADS to {test.env_vars["OMP_NUM_THREADS"]}')
 
 
@@ -784,58 +842,67 @@ def extract_memory_usage(test: rfm.RegressionTest):
 
 def add_buildenv_module(test: rfm.RegressionTest, index=-1):
     """
-    Add a buildenv module that matches the reference module to the list of modules
+    Add a buildenv module that matches the reference module to the list of module names
 
 
     Arguments:
     - test: ReFrame test to which this hook should apply
-    - index: module index in test.modules to take as the reference (default is last);
-             note that the reference module’s toolchain should not be at the system
-             level: otherwise only buildenv modules at the system level can be added
+    - index: module index in test.module_names to take as the reference (default is last)
+             Note that the reference module’s toolchain should not be at the system
+             level: otherwise only buildenv modules at the system level can be added.
 
     Requirements:
     - recent enough easybuild python package
     - a matching default buildenv module (e.g. buildenv/default-foss-2024a) available on the system
     """
-    for mod in test.modules:
+    if test.valid_systems == [INVALID_SYSTEM]:
+        return
+
+    for mod in test.module_names:
         if mod.split('/')[0] == 'buildenv':
             # buildenv module already in the list
             return
 
     # get list of buildenv modules on the system
     # make global to avoid calculating _buildenv_modules multiple times
-    global _buildenv_modules
-    if not _buildenv_modules:
-        _buildenv_modules = set(find_modules('buildenv'))
+    global _buildenv_module_infos
+    if _buildenv_module_infos == []:
+        _buildenv_module_infos = set(find_modules('buildenv'))
         to_remove = []
-        for mod in _buildenv_modules:
-            mod_parts = split_module(mod)
+        for mod_info in _buildenv_module_infos:
+            mod_parts = split_module(mod_info[2])
             if mod_parts[4] or mod_parts[1] != 'default':
                 # only consider default buildenv modules without versionsuffixes
-                to_remove.append(mod)
+                to_remove.append(mod_info)
 
-        _buildenv_modules = [x for x in _buildenv_modules if x not in to_remove]
+        _buildenv_module_infos = [x for x in _buildenv_module_infos if x not in to_remove]
 
-        if not _buildenv_modules:
+        if not _buildenv_module_infos:
+            # set to False so we don't try to find them again
+            _buildenv_module_infos = False
             msg = 'No default buildenv modules without versionsuffixes found on the system.'
             log(msg)
             test.valid_systems = [INVALID_SYSTEM]
             return
 
-    ref_module = test.modules[index]
-    matching_modules = select_matching_modules(list(_buildenv_modules), ref_module)
+    syspart, env, _ = test.module_info
+    # only consider the buildenv modules with corresponding system:partition and programming environment
+    buildenv_mod_infos = [x for x in _buildenv_module_infos if x[0] == syspart and x[1] == env]
 
-    if not matching_modules:
-        msg = f'No matching buildenv module for {ref_module} found on the system.'
+    ref_mod_info = (syspart, env, test.module_names[index])
+
+    matching_mod_infos = select_matching_modules(list(buildenv_mod_infos), ref_mod_info)
+    if not matching_mod_infos:
+        msg = f'No matching buildenv module for {ref_mod_info} found on the system.'
         log(msg)
         test.valid_systems = [INVALID_SYSTEM]
         return
 
-    if len(matching_modules) > 1:
-        msg = f'Multiple matching buildenv modules found, will use the first one: {_buildenv_modules}.'
+    if len(matching_mod_infos) > 1:
+        msg = f'Multiple matching buildenv modules found, will use the first one: {matching_mod_infos[0]}.'
         log(msg)
 
-    buildenv_mod = matching_modules[0]
+    buildenv_mod = matching_mod_infos[0][2]
     # insert to keep the most important module last
-    test.modules.insert(0, buildenv_mod)
-    log(f'Module {buildenv_mod} added to list of modules')
+    test.module_names.insert(0, buildenv_mod)
+    log(f'module_names set to {test.module_names}')

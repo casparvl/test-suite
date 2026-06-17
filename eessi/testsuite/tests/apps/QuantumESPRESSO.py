@@ -29,18 +29,18 @@ See also https://reframe-hpc.readthedocs.io/en/stable/pipeline.html
 """
 
 import reframe as rfm
-from hpctestlib.sciapps.qespresso.benchmarks import QEspressoPWCheck
 from reframe.core.builtins import parameter, run_after
 
 from eessi.testsuite.constants import COMPUTE_UNITS, DEVICE_TYPES
 from eessi.testsuite.eessi_mixin import EESSI_Mixin
+from eessi.testsuite.hpctestlib.sciapps.qespresso.benchmarks import QEspressoPWCheck
 from eessi.testsuite.utils import find_modules
 
 
 @rfm.simple_test
 class EESSI_QuantumESPRESSO_PW(QEspressoPWCheck, EESSI_Mixin):
     time_limit = '30m'
-    module_name = parameter(find_modules('QuantumESPRESSO'))
+    module_info = parameter(find_modules('QuantumESPRESSO'))
     # For now, QE is built for CPU targets only
     device_type = parameter([DEVICE_TYPES.CPU])
     readonly_files = ['']
@@ -55,7 +55,7 @@ class EESSI_QuantumESPRESSO_PW(QEspressoPWCheck, EESSI_Mixin):
         min_ecut = min(QEspressoPWCheck.ecut.values)
         min_nbnd = min(QEspressoPWCheck.nbnd.values)
         if self.ecut == min_ecut and self.nbnd == min_nbnd:
-            self.bench_name = self.bench_name_ci = 'bench_ci'
+            self.is_ci_test = True
 
     @run_after('init')
     def set_increased_walltime(self):

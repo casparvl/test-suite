@@ -1,7 +1,7 @@
 # ReFrame configuration file that can be used in GitHub Actions with EESSI
 
-from eessi.testsuite.common_config import common_logging_config
-from eessi.testsuite.constants import *
+from eessi.testsuite.common_config import common_logging_config, set_common_required_config
+from eessi.testsuite.constants import EXTRAS, FEATURES, SCALES
 
 
 site_configuration = {
@@ -16,18 +16,11 @@ site_configuration = {
                     'name': 'default',
                     'scheduler': 'local',
                     'launcher': 'local',
-                    'environs': ['default'],
                     'features': [FEATURES.CPU] + list(SCALES.keys()),
                     'processor': {
                         'num_cpus': 2,
                         'num_cpus_per_core': 1,
                     },
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'max_jobs': 1,
                     'extras': {
                         # Make sure to round down, otherwise a job might ask for more mem than is available
@@ -39,14 +32,6 @@ site_configuration = {
             ]
         }
     ],
-    'environments': [
-        {
-            'name': 'default',
-            'cc': 'cc',
-            'cxx': '',
-            'ftn': ''
-        }
-    ],
     'general': [
         {
             'purge_environment': True,
@@ -55,3 +40,6 @@ site_configuration = {
     ],
     'logging': common_logging_config(),
 }
+
+# Set common Slurm config options
+set_common_required_config(site_configuration)
