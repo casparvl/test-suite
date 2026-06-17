@@ -185,7 +185,7 @@ site_configuration = {
                         prepare_eessi_init,
                         post_init,
                     ],
-                    'access': hortense_access + ['--partition=gpu_rome_a100_80'],
+                    'access': hortense_access + ['--partition=gpu_rome_a100_80_rhel9'],
                     'env_vars': common_env_vars,
                     'sched_options': {
                         'sched_access_in_submit': True,
