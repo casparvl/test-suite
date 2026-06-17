@@ -39,7 +39,7 @@ source "${CI_CONFIG}"
 # Set default configuration, but let anything set by CI_CONFIG take priority
 REFRAME_ARGS="${REFRAME_ARGS:---tag CI --tag 1_node}"
 REFRAME_VERSION="${REFRAME_VERSION:-4.8.1}"
-REFRAME_URL="${REFRAME_URL:-REFRAME_URL=https://github.com/reframe-hpc/reframe.git}"
+REFRAME_URL="${REFRAME_URL:-https://github.com/reframe-hpc/reframe.git}"
 REFRAME_BRANCH="${REFRAME_BRANCH:-v${REFRAME_VERSION}}"
 EESSI_TESTSUITE_URL="${EESSI_TESTSUITE_URL:-https://github.com/EESSI/test-suite.git}"
 if [ -z "${EESSI_TESTSUITE_BRANCH}" ]; then
