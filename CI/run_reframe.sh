@@ -77,12 +77,6 @@ source "${TEMPDIR}"/reframe_venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install reframe-hpc=="${REFRAME_VERSION}"
 
-# Clone reframe repo to have the hpctestlib:
-REFRAME_CLONE_ARGS="${REFRAME_URL} --branch ${REFRAME_BRANCH} --depth 1 ${TEMPDIR}/reframe"
-echo "Cloning ReFrame repo: git clone ${REFRAME_CLONE_ARGS}"
-git clone ${REFRAME_CLONE_ARGS}
-export PYTHONPATH="${PYTHONPATH}":"${TEMPDIR}"/reframe
-
 # Clone configs from test suite repo
 EESSI_CONFIGS_CLONE_ARGS="-n --filter=tree:0 ${EESSI_CONFIGS_TESTSUITE_URL} --branch ${EESSI_CONFIGS_TESTSUITE_BRANCH} --depth 1 ${TEMPDIR}/configs"
 echo "Cloning configs from EESSI test suite repo:"
