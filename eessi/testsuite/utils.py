@@ -6,23 +6,25 @@ import inspect
 import os
 import re
 import sys
-from typing import Iterator, List
+from typing import Iterator, List, Tuple
 
 import reframe as rfm
 from reframe.core.exceptions import ReframeFatalError
 from reframe.core.logging import getlogger
 import reframe.core.runtime as rt
 from reframe.frontend.printer import PrettyPrinter
+from reframe.utility import typecheck as typ
 
 from eessi.testsuite.constants import DEVICE_TYPES
 
 printer = PrettyPrinter()
 
 # global variables
-_available_modules = []
 _eb_is_available = False
 _eb_avail_warning_is_printed = False
 _unique_msg_ids = []
+_modules_cache = {}
+_mod_hierarchies = {}
 
 try:
     from easybuild.framework.easyconfig.easyconfig import get_toolchain_hierarchy
@@ -103,6 +105,7 @@ def split_module(module: str) -> tuple:
     2) there are no hyphens in the version, toolchain_name, or toolchain_version unless exceptions are added
     Exceptions:
     - toolchain_name 'intel-compilers'
+    - toolchain_name 'llvm-compilers'
 
     Arguments:
     - module: the full module name
@@ -115,8 +118,8 @@ def split_module(module: str) -> tuple:
     if len(parts) == 1:  # system toolchain, no versionsuffix
         parts.extend(['system', 'system'])
 
-    # special casing intel-compilers:
-    if parts[1] == 'intel' and parts[2] == 'compilers':
+    # special casing intel-compilers and llvm-compilers:
+    if parts[1] in ['intel', 'llvm'] and parts[2] == 'compilers':
         parts = [parts[0], '-'.join(parts[1:3])] + parts[3:]
 
     tcname = parts[1]
@@ -128,83 +131,77 @@ def split_module(module: str) -> tuple:
     return name, version, tcname, tcversion, versionsuffix
 
 
-def get_avail_modules() -> List[str]:
-    "get all available modules in the system"
-    # use global to avoid recalculating the list of available modules multiple times
-    global _available_modules
-    if not _available_modules:
-        ms = rt.runtime().modules_system
-        # Returns e.g. ['Bison/', 'Bison/3.7.6-GCCcore-10.3.0', 'BLIS/', 'BLIS/0.8.1-GCC-10.3.0']
-        _available_modules = ms.available_modules('')
-        # Exclude anything without version, i.e. ending with / (e.g. Bison/)
-        _available_modules = [mod for mod in _available_modules if not mod.endswith('/')]
-        log(f"Total number of available modules: {len(_available_modules)}")
-    if not _available_modules:
-        msg = 'No available modules found on the system.'
-        raise EESSIError(msg)
-    return _available_modules
-
-
-def find_modules(regex: str, name_only=True) -> Iterator[str]:
+def find_modules(regex: str, environ_mapping=None, name_only=True) -> Iterator[Tuple[str, str, str]]:
     """
-    Return all modules matching the regular expression regex. Note that since we use re.search,
-    a module matches if the regex matches the module name at any place. I.e. the match does
-    not have to be at the start of the smodule name
+    Similar to reframe.utility.find_modules:
+    - adds caching, so that we don't have to do repeated module avail calls
+    - adds the name_only argument
 
     Arguments:
-    - regex: a regular expression
-    - name_only: regular expressions will only be matched on the module name, not the version (default: True).
-
-    Note: the name_only feature assumes anything after the last forward '/' is the version,
-    and strips that before doing a match.
-
-    Example
-
-    Suppose we have the following modules on a system:
-
-    gompic/2022a
-    gompi/2022a
-    CGAL/4.14.3-gompi-2022a
-
-    The following calls would return the following respective modules
-
-    find_modules('gompi') => [gompic/2022a, gompi/2022a]
-    find_modules('gompi$') => [gompi/2022a]
-    find_modules('gompi', name_only = False) => [gompic/2022a, gompi/2022a, CGAL/4.14.3-gompi-2022a]
-    find_modules('^gompi', name_only = False) => [gompic/2022a, gompi/2022a]
-    find_modules('^gompi/', name_only = False) => [gompi/2022a]
-    find_modules('-gompi-2022a', name_only = False) => [CGAL/4.14.3-gompi-2022a]
-
+    - regex: regular expression used to find matching modules
+    - environ_mapping: environment mapping
+    - name_only: whether to match only the name of the module, not the version
     """
 
     if not isinstance(regex, str):
-        raise TypeError("'substr' argument must be a string")
+        raise TypeError("'regex' argument must be a string")
 
-    seen = set()
-    dupes = []
-    for mod in get_avail_modules():
-        # The thing we yield should always be the original module name (orig_mod), including version
-        orig_mod = mod
-        if name_only:
-            # Remove trailing slashes from the regex (in case the callee forgot)
-            regex = regex.rstrip('/')
-            # Remove part after the last forward slash, as we assume this is the version
-            mod = re.sub('/[^/]*$', '', mod)
-        # Match the actual regular expression
-        log(f"Matching module {mod} with regex {regex}")
-        if re.search(regex, mod):
-            log("Match!")
-            if orig_mod in seen:
-                dupes.append(orig_mod)
-            else:
-                seen.add(orig_mod)
-            yield orig_mod
+    if (environ_mapping is not None and not isinstance(environ_mapping, typ.Dict[str, str])):
+        raise TypeError("'environ_mapping' argument must be of type Dict[str,str]")
 
-    if dupes:
-        err_msg = "EESSI test-suite cannot handle duplicate modules. "
-        err_msg += "Please make sure that only one is available on your system. "
-        err_msg += f"The following modules have a duplicate on your system: {dupes}"
-        raise ValueError(err_msg)
+    if name_only:
+        # Remove trailing slashes from the regex (in case the callee forgot)
+        regex = regex.rstrip('/')
+
+    regex_re = re.compile(regex)
+    name_only_re = re.compile(r'/[^/]*$')
+
+    def _is_valid_for_env(mod, env):
+        if environ_mapping is None:
+            return True
+
+        for patt, env in environ_mapping.items():
+            if re.match(patt, mod) and env == env:
+                return True
+
+        return False
+
+    ms = rt.runtime().modules_system
+    current_system = rt.runtime().system
+    snap0 = rt.snapshot()
+
+    for part in current_system.partitions:
+        if part.fullname not in _modules_cache:
+            _modules_cache[part.fullname] = {}
+        for env in part.environs:
+            rt.loadenv(part.local_env, env)
+            if env.name not in _modules_cache[part.fullname]:
+                log(f'Getting available modules for ({part.fullname}, {env.name})')
+                available_modules = sorted(ms.available_modules())
+                _modules_cache[part.fullname][env.name] = [mod for mod in available_modules if not mod.endswith('/')]
+            snap0.restore()
+            seen = set()
+            dupes = []
+            for mod in _modules_cache[part.fullname][env.name]:
+                modmod = mod
+                if name_only:
+                    modmod = name_only_re.sub('', mod)
+                if regex_re.search(modmod):
+                    log(f"Matched module {mod} with regex {regex}")
+                    if mod in seen:
+                        dupes.append(mod)
+                    else:
+                        seen.add(mod)
+                    if _is_valid_for_env(mod, env.name):
+                        yield (part.fullname, env.name, mod)
+
+            if dupes:
+                err_msg = (
+                    "EESSI test-suite cannot handle duplicate modules. "
+                    "Please make sure that only one is available on your system. "
+                    f"The following modules have a duplicate on your system: {sorted(dupes)}"
+                )
+                raise ValueError(err_msg)
 
 
 def get_tc_hierarchy(tcdict):
@@ -227,40 +224,50 @@ def get_tc_hierarchy(tcdict):
             _eb_avail_warning_is_printed = True
 
 
-def select_matching_modules(modules: List[str], ref_module: str) -> List[str]:
+def select_matching_modules(module_infos: List[tuple], ref_module_info: tuple) -> List[tuple]:
     """
-    Return from a list of modules all modules that match the
+    Return, from a list of module_info tuples, all module_info tuples with modules that match the
     toolchain of a reference module.
 
     Arguments:
-    - modules: list of modules from which a selection is made
-    - ref_module: the reference module
+    - module_infos: list of module info tuples from which a selection is made
+    - ref_module_info: the reference module info
 
     Requirements:
     - recent enough easybuild Python package
     """
 
-    selected_mods = []
+    selected_mod_infos = []
 
-    ref_tcname, ref_tcversion = split_module(ref_module)[2:4]
+    ref_syspart, ref_env, ref_mod = ref_module_info
+
+    ref_tcname, ref_tcversion = split_module(ref_mod)[2:4]
     ref_tcdict = {'name': ref_tcname, 'version': ref_tcversion}
     ref_hierarchy = get_tc_hierarchy(ref_tcdict)
     if not ref_hierarchy:
         return []
 
-    for mod in modules:
+    for mod_info in module_infos:
+        syspart, env, mod = mod_info
+        # only select the ones that have the same system:partition and environment as the reference
+        if syspart != ref_syspart or env != ref_env:
+            continue
+
         mod_tcname, mod_tcversion = split_module(mod)[2:4]
         mod_tcdict = {'name': mod_tcname, 'version': mod_tcversion}
 
-        mod_hierarchy = get_tc_hierarchy(mod_tcdict)
+        if mod not in _mod_hierarchies:
+            _mod_hierarchies[mod] = get_tc_hierarchy(mod_tcdict)
+
+        mod_hierarchy = _mod_hierarchies[mod]
         if not mod_hierarchy:
             return []
 
         # toolchain hierarchy does not contain super-toolchains, only sub-toolchains
         if ref_tcdict in mod_hierarchy or mod_tcdict in ref_hierarchy:
-            selected_mods.append(mod)
+            selected_mod_infos.append(mod_info)
 
-    return selected_mods
+    return selected_mod_infos
 
 
 def check_proc_attribute_defined(test: rfm.RegressionTest, attribute) -> bool:

@@ -1,6 +1,6 @@
 import os
 
-from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
                                            get_sbatch_account, set_common_required_config)
 from eessi.testsuite.constants import DEVICE_TYPES, EXTRAS, FEATURES, GPU_VENDORS, SCALES
 
@@ -30,7 +30,6 @@ site_configuration = {
                     'env_vars': [],
                     'prepare_cmds': [
                         "module unuse /apps/GPP/modulefiles/applications",
-                        common_eessi_init(),
                         'export OMPI_MCA_pml=ucx',
                         # Work around "Failed to modify UD QP to INIT on mlx5_0: Operation not permitted" issue
                         # until we can resolve this through an LMOD hook in host_injections.
@@ -60,7 +59,6 @@ site_configuration = {
                     'env_vars': [],
                     'prepare_cmds': [
                         "module unuse /apps/GPP/modulefiles/applications",
-                        common_eessi_init(),
                         'export OMPI_MCA_pml=ucx',
                         # Work around "Failed to modify UD QP to INIT on mlx5_0: Operation not permitted" issue
                         # until we can resolve this through an LMOD hook in host_injections.

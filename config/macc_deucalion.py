@@ -1,6 +1,6 @@
 import os
 
-from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
                                            set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, FEATURES, SCALES
 
@@ -26,7 +26,6 @@ site_configuration = {
                         # bypass CPU autodetection for now aarch64/a64fx,
                         # see https://github.com/EESSI/software-layer/pull/608
                         'export EESSI_SOFTWARE_SUBDIR_OVERRIDE=aarch64/a64fx',
-                        common_eessi_init(),
                         # Pass job environment variables like $PATH, etc., into job steps
                         'export SLURM_EXPORT_ENV=HOME,PATH,LD_LIBRARY_PATH,PYTHONPATH',
                     ],

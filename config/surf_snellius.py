@@ -15,7 +15,7 @@
 
 import os
 
-from eessi.testsuite.common_config import (common_eessi_init, common_general_config, common_logging_config,
+from eessi.testsuite.common_config import (common_general_config, common_logging_config,
                                            set_common_required_config)
 from eessi.testsuite.constants import EXTRAS, DEVICE_TYPES, FEATURES, GPU_VENDORS, SCALES
 
@@ -42,7 +42,6 @@ site_configuration = {
                 {
                     'name': 'rome',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
                     'access': ['-p rome', '--export=None'],
                     'max_jobs': 120,
@@ -59,12 +58,6 @@ site_configuration = {
                 {
                     'name': 'genoa',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [
-                        # EESSI init script (for now) falls back to zen3, since the zen4 is incomplete
-                        # But, we want to really test the zen4 branch on these nodes
-                        'export EESSI_SOFTWARE_SUBDIR_OVERRIDE=x86_64/amd/zen4',
-                        common_eessi_init()
-                    ],
                     'launcher': 'mpirun',
                     'access': ['-p genoa', '--export=None'],
                     'max_jobs': 120,
@@ -81,7 +74,6 @@ site_configuration = {
                 {
                     'name': 'gpu_A100',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
                     'access': ['-p gpu_a100', '--export=None'],
                     'max_jobs': 60,
@@ -106,7 +98,6 @@ site_configuration = {
                 {
                     'name': 'gpu_H100',
                     'scheduler': 'slurm',
-                    'prepare_cmds': [common_eessi_init()],
                     'launcher': 'mpirun',
                     'access': ['-p gpu_h100', '--export=None'],
                     'max_jobs': 60,
