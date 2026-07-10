@@ -93,6 +93,12 @@ site_configuration = {
             ]
         },
     ],
+    # JUST FOR TESTING, SHOULD BE REMOVED BEFORE MERGE
+    'environments': [
+        {
+            'name': 'default',
+        }
+    ],
     'logging': common_logging_config(reframe_prefix),
     'general': [
         {
