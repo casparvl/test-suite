@@ -34,6 +34,7 @@ site_configuration = {
                     'name': 'x86_64-generic-16c-30gb',
                     'access': ['--partition=x86-64-generic-node', '--export=NONE'],
                     'descr': 'Generic (Haswell), 16 cores, 30 GB',
+                    'environs': ['default'],
                 },
                 {
                     'name': 'x86_64-haswell-16c-30gb',
