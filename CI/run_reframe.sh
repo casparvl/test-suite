@@ -88,12 +88,14 @@ export UNSET_MODULEPATH="${UNSET_MODULEPATH:-True}"
 # Which local programming environments to test. Note that these are names of ReFrame programming environments.
 # These need to match names that are defined in the ReFrame configuration file
 export REFRAME_LOCAL_PROGRAMMING_ENVS="${REFRAME_LOCAL_PROGRAMMING_ENVS:-}"  # Assumed to be a comma seperated list
-# Do a 'module load ${LOCAL_MODULES}' before loading other modules (obsolete? Should be handled by ReFrame programming envs now)
-export SET_LOCAL_MODULE_ENV="${SET_LOCAL_MODULE_ENV:-False}"
 
 # Check that SOME programming env has been defined. If not, exit early with instructions
 if [ -z $REFRAME_EESSI_PROGRAMMING_ENVS ] && [ -z $REFRAME_LOCAL_PROGRAMMING_ENVS ]; then
-    echo "You should define at least one ReFrame programming environment that needs to be tested (by defining either REFRAME_EESSI_PROGRAMMING_ENVS or REFRAME_LOCAL_PROGRAMMING_ENVS). Exiting..."
+    msg="You should define at least one ReFrame programming environment that needs to be tested (by defining either"
+    msg="$msg REFRAME_EESSI_PROGRAMMING_ENVS or REFRAME_LOCAL_PROGRAMMING_ENVS). Note that"
+    msg="$msg REFRAME_EESSI_PROGRAMMING_ENVS can be set indirectly by setting USE_EESSI_SOFTWARE_STACK=True."
+    msg="$msg Exiting..."
+    echo "$msg"
     exit 1
 fi
 
@@ -132,15 +134,6 @@ else
     # Store the original modulepath. If we need to use the module command from EESSI, we need
     # to restore this modulepath after initializing the module command
     MODULEPATH_ORIGINAL=$MODULEPATH
-fi
-
-# Set local module environment
-if [ "$SET_LOCAL_MODULE_ENV" == "True" ]; then
-    if [ -z "${LOCAL_MODULES}" ]; then
-        echo "You have to add the name of the module in the ci_config.sh file of your system"
-        exit 1
-    fi
-    module load ${LOCAL_MODULES}
 fi
 
 # With https://github.com/EESSI/test-suite/pull/326 we no longer need to load the EESSI module
@@ -215,7 +208,6 @@ echo "ReFrame prefix: ${RFM_PREFIX}"
 echo "Testing ReFrame programming environments: ${REFRAME_PROGRAMMING_ENVS}"
 echo "ReFrame args: ${REFRAME_ARGS}"
 echo "Using EESSI: ${USE_EESSI_SOFTWARE_STACK}"
-echo "Using local software stack ${SET_LOCAL_MODULE_ENV}"
 echo "MODULEPATH: ${MODULEPATH}"
 echo ""
 
