@@ -127,7 +127,7 @@ git clone ${EESSI_CLONE_ARGS}
 export PYTHONPATH="${PYTHONPATH}":"${TEMPDIR}"/test-suite/
 
 # Unset the ModulePath on systems where it is required
-unset MODULEPATH_ORIGINAL
+unset MODULEPATH_ORIGINAL  # Make sure this isn't defined, or we might restore from some external value later on
 if [ "$UNSET_MODULEPATH" == "True" ]; then
     unset MODULEPATH
 else
