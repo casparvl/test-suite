@@ -15,7 +15,7 @@
 
 import os
 
-from eessi.testsuite.common_config import common_logging_config, common_general_config
+from eessi.testsuite.common_config import common_logging_config, common_general_config, set_common_required_config
 from eessi.testsuite.constants import *  # noqa: F403
 
 # This config will write all staging, output and logging to subdirs under this prefix
@@ -45,21 +45,13 @@ site_configuration = {
                     'scheduler': 'slurm',
                     'prepare_cmds': [
                         'export EESSI_VERSION_OVERRIDE=2025.06-001',
-                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
+#                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
+                        'env > /home/cvanleeuwe/my_env'
                     ],
+                    'environs': ['EESSI-2025.06-001'],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p arriesgado-hirsute', '--nodelist arriesgado-1', '--export=None', '--time=1:00:00'],
-                    'environs': ['default'],
                     'max_jobs': 2,
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'features': [
                         FEATURES.CPU,
                     ] + valid_scales_arriesgado,
@@ -75,21 +67,12 @@ site_configuration = {
                     'scheduler': 'slurm',
                     'prepare_cmds': [
                         'export EESSI_VERSION_OVERRIDE=2025.06-001',
-                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
+#                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
                     ],
+                    'environs': ['EESSI-2025.06-001'],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p bananaf3', '--nodelist bananaf3-8', '--export=None', '--time=1:00:00'],
-                    'environs': ['default'],
                     'max_jobs': 2,
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'features': [
                         FEATURES.CPU,
                     ] + valid_scales_bananaf3,
@@ -105,26 +88,17 @@ site_configuration = {
                     'scheduler': 'slurm',
                     'prepare_cmds': [
                         'export EESSI_VERSION_OVERRIDE=2025.06-001',
-                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
+#                        'source /cvmfs/software.eessi.io/versions/%s/init/bash' % os.getenv('EESSI_VERSION', '2025.06')
                     ],
+                    'environs': ['EESSI-2025.06-001'],
                     # Avoid error
                     # "The gds/shmem2 component attempted to attach to a shared-memory segment at a particular base
                     # address, but was given a different one."
                     # by disabling the gds/shmem2 component
                     'env_vars': [['PMIX_MCA_gds', 'hash']],
                     'launcher': 'mpirun',
-                    'sched_options': {
-                        'use_nodes_option': True,
-                    },
                     'access': ['-p premier', '--export=None', '--time=1:00:00'],
-                    'environs': ['default'],
                     'max_jobs': 8,
-                    'resources': [
-                        {
-                            'name': 'memory',
-                            'options': ['--mem={size}'],
-                        }
-                    ],
                     'features': [
                         FEATURES.CPU,
                     ] + valid_scales_premier,
@@ -141,10 +115,16 @@ site_configuration = {
     ],
     'environments': [
         {
-            'name': 'default',
-            'cc': 'cc',
-            'cxx': '',
-            'ftn': '',
+            'name': 'EESSI-2025.06-001',
+            'modules': ['EESSI/2025.06'],
+# Env_vars don't work, because they get set _after_ loading the modules https://github.com/reframe-hpc/reframe/blob/3adb203db08d7648cc3ba54ea4f9297210f09d59/reframe/core/runtime.py#L259
+#            'env_vars': [
+#                ['EESSI_VERSION_OVERRIDE', '2025.06-001'],
+#                ['EESSI_SOFTWARE_SUBDIR_OVERRIDE', 'riscv64/generic'],
+#                ['EESSI_CPU_FAMILY_OVERRIDE', 'x86_64'],
+#            ],
+# Prepare_cmds don't work because they don't get emitted when running find_modules https://github.com/reframe-hpc/reframe/issues/3698
+#            'prepare_cmds': ['export EESSI_VERSION_OVERRIDE=2025.06-001', 'export EESSI_SOFTWARE_SUBDIR_OVERRIDE=riscv64/generic', 'export EESSI_CPU_FAMILY_OVERRIDE=x86_64', 'module load EESSI/2025.06', 'touch > /home/cvanleeuwe/testenv' ],
         },
     ],
     'logging': common_logging_config(reframe_prefix),
@@ -157,3 +137,13 @@ site_configuration = {
         }
     ],
 }
+
+# Set common Slurm config options
+set_common_required_config(site_configuration)
+
+# Overwrite the valid environments - standard EESSI/2023.06 and 2025.06 are note yet valid
+for part in site_configuration['systems'][0]['partitions']:
+    part['environs']=['EESSI-2025.06-001']
+
+
+site_configuration['environments']=[{'name':'EESSI-2025.06-001','modules':['EESSI/2025.06']}]
