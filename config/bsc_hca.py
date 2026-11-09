@@ -139,7 +139,7 @@ site_configuration = {
 eessi_prepare_cmds = [
     # system doesn’t have an Lmod installation by default, the following
     # commands will use the one from EESSI
-    'source /cvmfs/software.eessi.io/2026.06/init/lmod/bash',
+    'source /cvmfs/software.eessi.io/versions/2026.06/init/lmod/bash',
     'module purge',
 ]
 
